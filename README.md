@@ -1,5 +1,5 @@
 # Imputation_Autoencoder
-Deep learning based algorithm for imputation of genetic variants
+Deep learning based imputation of genetic variants, this algorithm can be used either in grid search training or in training with increasing mask ratio.
 
 ## Dependencies
 
@@ -30,7 +30,6 @@ Where:
 - initial_masking_rate: [float, fraction] initial masking rate, set 0 to disable masking
 - final_masking_rate: [float, fraction] final masking rate,  set 0 to disable masking
 
-
 A more practical example:
 ```
 python3.6 imputation_autoencoder.py input_example.vcf 3_hyper_par_set.txt False 0.01 0.98
@@ -52,6 +51,7 @@ The hyperparameters are provided as a tab delimited list, where each column is p
 - gamma: [float] scaling factor for focal loss, ignored when loss_type!=FL
 - optimizer: [string] optimizer type, values supported: ['GradientDescent', 'Adam', 'RMSProp']
 - loss_type: [string] loss type, values supported: ['MSE', 'CE', 'WCE', 'FL'], which respectively mean: mean squared error, cross entropy, weighted cross entropy, and focal loss.
+- h_size: [float,string] hidden layer size, if 'sqrt' the hidden layer size will be equal to the square root of the input layer size, if float, the hidden layer size will be the hyperparameter value multiplied by input layer size
 
 Example of one set of hyperparameters, following the listed order:
 ```
@@ -62,9 +62,9 @@ head -n 1 3_hyper_par_set.txt
 Multiple sets of hyperparameter values can be provided in the same file, one set per line, for example:
 ```
 cat 3_hyper_par_set.txt
-1e-06 1e-06 0.001 0.07 relu 10 5 RMSProp WCE
-1e-05 1e-08 6 0.04 tanh 1e-05 2 GradientDescent FL
-0.01 0.0001 0.01 0.004 tanh 0.0001 0 Adam FL
+1e-06 1e-06 0.001 0.07 relu 10 5 RMSProp WCE sqrt
+1e-05 1e-08 6 0.04 tanh 1e-05 2 GradientDescent FL 1
+0.01 0.0001 0.01 0.004 tanh 0.0001 0 Adam FL 0.5
 ```
 
 In the example above the imputation autoencoder algorithm will train one model per hyperparameter set (3 models total).
