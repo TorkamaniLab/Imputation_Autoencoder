@@ -1029,7 +1029,7 @@ def focal_loss(y_pred, y_true):
     FL_per_var_0 = tf.multiply(CE_0, alpha_0)
 
     #avoid useless calculations
-    if(gamma>=1):
+    if(gamma>0):
         FL_per_var_1 = tf.multiply(gamma_1, FL_per_var_1)
         FL_per_var_0 = tf.multiply(gamma_0, FL_per_var_0)
 
