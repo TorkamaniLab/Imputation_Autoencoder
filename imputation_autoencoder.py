@@ -96,7 +96,7 @@ last_batch_validation = False #when k==1, you may use the last batch for valitat
 #loss_type = "WMSE" #MSE, CE, WMSE, WCE, FL, Pearson, WMSE #mean(((1.5-MAF)^5)*MSE)
 #gamma = 5.0 #gamma hyper parameter value, >0 = use WMSE with selected gamma, 0 = do simple MSE as loss function, -1, use Pearson r2 as loss function
 alt_signal_only = False #TODO Wether to treat variables as alternative allele signal only, like Minimac4, estimating the alt dosage
-hsize = 0.5 #[0.1-1] size ratio for hidden layer, multiplied by number of input nodes
+#hsize = 0.5 #[0.1-1] size ratio for hidden layer, multiplied by number of input nodes
 
 #Masking options
 replicate_ARIC = False #True: use the same masking pattern as ARIC genotype array data, False: Random masking
@@ -1881,10 +1881,20 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         n_input = len(data_obs[0])*len(data_obs[0][0])
     else:
         n_input = len(data_obs[0])*3     # input features N_variants*subfeatures
-        
-    n_hidden_1 = int(round(n_input*hsize))  # hidden layer for encoder, equal to input number of features multiplied by a hidden size ratio
+    
+    global hsize
+
+    if(hsize=="sqrt"):
+        n_hidden_1=int(round(np.sqrt(n_input))) #if hsize equal 'sqrt' hidden layer size equal to square root of number of input nodes
+    else:
+        hsize=convert_to_float(hsize)
+        n_hidden_1 = int(round(n_input*hsize))  # hidden layer for encoder, equal to input number of features multiplied by a hidden size ratio
+
     print("Input data shape after coding variables:")
     print(n_input)
+    
+    print("Network size per layer:")
+    print(n_input, n_hidden_1, n_input)
     
     # Input placeholders
     #with tf.name_scope('input'):
@@ -2823,7 +2833,8 @@ def main():
         
     global gamma
     global loss_type
-    global optimizer_type      
+    global optimizer_type
+    global hsize
     
     if(len(sys.argv)==6):
         print("Parsing input file: ")
@@ -2878,6 +2889,7 @@ def main():
             gamma = float(hp_array[i][6])
             optimizer_type = str(hp_array[i][7])
             loss_type = str(hp_array[i][8])
+            hsize=str(hp_array[i][9])
             
             if(i==0):
                 data_obs = process_data(sys.argv[1],categorical) #input file, i.e: HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf
@@ -2910,6 +2922,7 @@ def main():
         #sys.argv[11] = [True,False] Recovery mode is False
         #sys.argv[12] = [1/846] Initial masking rate
         #sys.argv[13] = [float] Final masking rate
+        #sys.argv[14] = [float,string] hidden layer size
 
         l1 = float(sys.argv[2])
         l2 = float(sys.argv[3])
@@ -2930,6 +2943,8 @@ def main():
         recovery_mode = sys.argv[11]
         initial_masking_rate = convert_to_float(sys.argv[12])
         maximum_masking_rate = convert_to_float(sys.argv[13])
+
+        hsize=str(sys.argv[14])
 
         if(maximum_masking_rate==0):
             disable_masking = True
