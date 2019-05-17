@@ -19,8 +19,9 @@ Deep learning based algorithm for imputation of genetic variants
 - grid_search_summary.ipynb: summary results example for grid search
 
 ## How to run
-
+```
 python3.6 imputation_autoencoder.py input_file parameter_file save_model initial_masking_rate final_masking_rate
+```
 
 Where:
 - input_file: is a input file containing genetic variants in vcf format.
@@ -71,6 +72,6 @@ In the example above the imputation autoencoder algorithm will train one model p
 ## Results
 
 After running the example above, the results will look like this:
-
+TODO: adding example soon...
 
 
