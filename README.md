@@ -74,9 +74,7 @@ In the example above the imputation autoencoder algorithm will train one model p
 
 ## Results
 The autoencoder prints detailed and summarized reports for each epoch and for the complete training process.
-
-
-After running the example above, the results will look like this:
+After running the example shown in the "How to run" session, the results will look like this:
 ```
 grep -w "RESULT\|LABELS" output.txt
 LABELS [L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size, rsloss, rloss, sloss, acc, ac_r, ac_c, F1_micro, F1_macro, F1_weighted]
@@ -96,3 +94,5 @@ Where the first 10 values are just the hyperparameters set by the user (L1, L2, 
 - F1_micro: F1 score (micro, per sample)
 - F1_macro: F1 score (macro, per feature)
 - F1_weighted: F1 score (weighted, typical F1-score across all genotypes)
+
+The summary results are shown in one 'RESULT  [*]' line per hyperparameter set.
