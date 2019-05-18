@@ -35,7 +35,10 @@ A more practical example:
 python3.6 imputation_autoencoder.py input_example.vcf 3_hyper_par_set.txt False 0.01 0.98
 ```
 The example above will run training using input_example.vcf, applying hyperparameter values from 3_hyper_par_set.txt, not saving the model into disk (False), starting with a small masking ratio (0.01), and will keep increasing masking until it reaches 0.98 masking ratio.
-
+You can redirect the reports from stdout to an output file like this:
+```
+python3.6 imputation_autoencoder.py input_example.vcf 3_hyper_par_set.txt False 0.01 0.98 1> output.txt 2>output.log
+```
 
 ## Hyperparameters
 
@@ -70,8 +73,26 @@ cat 3_hyper_par_set.txt
 In the example above the imputation autoencoder algorithm will train one model per hyperparameter set (3 models total).
 
 ## Results
+The autoencoder prints detailed and summarized reports for each epoch and for the complete training process.
+
 
 After running the example above, the results will look like this:
-TODO: adding example soon...
+```
+grep -w "RESULT\|LABELS" output.txt
+LABELS [L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size, rsloss, rloss, sloss, acc, ac_r, ac_c, F1_micro, F1_macro, F1_weighted]
+RESULT  ['1e-06', '1e-06', '0.001', '0.07', 'relu', '10', '5', 'RMSProp', 'WCE', 'sqrt', 2676017101.6494365, 2676017101.649409, 0.02726494355565999, 0.29184148272461796, 0.3044332385839116, 0.2272403004899808, 0.6104014711437631, 0.49455319557435573, 0.5859730799447812]
+RESULT  ['1e-05', '1e-08', '6', '0.04', 'tanh', '1e-05', '2', 'GradientDescent', 'FL', '1', 4748104415.9408045, 4748104412.979811, 0.49349881797027567, 0.4643849319224788, 0.45409295052552784, 0.5171872712633583, 0.45847706551750844, 0.36278041530436894, 0.4258039655086927]
+RESULT  ['0.01', '0.0001', '0.01', '0.004', 'tanh', '0.0001', '0', 'Adam', 'FL', '0.5', 182497202.90918827, 182497202.90568063, 0.3507592655291003, 0.7759625001229091, 0.8046828055396102, 0.6286148462459205, 0.7194354786524245, 0.5464695094504292, 0.8942798322320101]
+```
 
+Where the first 10 values are just the hyperparameters set by the user (L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size), the next columns represent the resulting performance metrics for their respective hyperparameter set:
 
+- rsloss: final loss result combined with sparsity penalty (depends on loss type selected by the user, beta and rho)
+- rloss: reconstruction loss without sparsity penalty (depends on loss type selected by the user)
+- sloss: sparsity loss (depends on beta and rho)
+- acc: accuracy (proportion of correct predictions versus total number of predictions)
+- ac_r: accuracy for MAF <= 0.01 
+- ac_c: accuracy for MAF > 0.01
+- F1_micro: F1 score (micro, per sample)
+- F1_macro: F1 score (macro, per feature)
+- F1_weighted: F1 score (weighted, typical F1-score across all genotypes)

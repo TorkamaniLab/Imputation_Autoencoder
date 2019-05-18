@@ -2977,7 +2977,7 @@ def main():
 
 if __name__ == "__main__":
     result = main()
-    print("LABELS [L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, rsloss, rloss, sloss, acc, ac_r, ac_c, F1_micro, F1_macro, F1_weighted]") 
+    print("LABELS [L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size, rsloss, rloss, sloss, acc, ac_r, ac_c, F1_micro, F1_macro, F1_weighted]") 
     if(len(sys.argv)==6):
         i = 0
         while(i < len(result)):
