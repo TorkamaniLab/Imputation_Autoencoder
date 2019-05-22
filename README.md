@@ -99,7 +99,7 @@ Where the first 10 values are just the hyperparameters set by the user (L1, L2, 
 The summary results are shown in one 'RESULT  [*]' line per hyperparameter set.
 
 ## Making a new hyperparameter grid
-You can change your list of possible hyperparameter values by editing the python script named make_hyperparameter_grid_for_grid_search.py
+You can change your list of possible hyperparameter values by editing the python script named make_hyperparameter_grid_for_grid_search.py.
 This is the current list of the hyper parameters set (copied from make_hyperparameter_grid_for_grid_search.py), which can be edited to either include new values or exclude old ones:
 
 ```
