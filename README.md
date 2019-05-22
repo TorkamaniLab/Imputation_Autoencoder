@@ -17,6 +17,7 @@ Deep learning based imputation of genetic variants, this algorithm can be used e
 - focal_loss_test_1.ipynb: an example demonstration of how the focal loss function works
 - Imputation_inference_function*.ipynb: examples of how to use a pre-trained model for inference
 - grid_search_summary.ipynb: summary results example for grid search
+- make_hyperparameter_grid_for_grid_search.py: a tool for making grids from combinations of hyperparameter values, generating a file with the same format as 3_hyper_par_set.txt.
 
 ## How to run
 ```
@@ -28,7 +29,7 @@ Where:
 - parameter_file: tab or space-delimited file containing one set of hyperparameters per line
 - save_model: [True, False] whether to save a backup of the trained model in the hard disk, the saved model file name will be inference_model*
 - initial_masking_rate: [float, fraction] initial masking rate, set 0 to disable masking
-- final_masking_rate: [float, fraction] final masking rate,  set 0 to disable masking
+- final_masking_rate: [float, fraction] final masking rate, set 0 to disable masking
 
 A more practical example:
 ```
@@ -96,3 +97,60 @@ Where the first 10 values are just the hyperparameters set by the user (L1, L2, 
 - F1_weighted: F1 score (weighted, typical F1-score across all genotypes)
 
 The summary results are shown in one 'RESULT  [*]' line per hyperparameter set.
+
+## Making a new hyperparameter grid
+You can change your list of possible hyperparameter values by editing the python script named make_hyperparameter_grid_for_grid_search.py
+This is the current list of the hyper parameters set (copied from make_hyperparameter_grid_for_grid_search.py), which can be edited to either include new values or exclude old ones:
+
+```
+act_arr = ['tanh']
+l1_arr = [1e-3,1e-4,1e-5,1e-6,1e-1,1e-2,1e-7,1e-8]
+l2_arr = [0]
+beta_arr = [1,2,4,6,8,10]
+rho_arr = [0.001, 0.004, 0.007, 0.01, 0.04, 0.07, 0.1, 0.4, 0.7, 1.0]
+learning_rate_arr = [0.00001, 0.0001, 0.001]
+gamma_arr = [0,0.5,1,2,3,5]
+opt_array = ["RMSProp"]
+loss_arr = ["FL"]
+hs_arr = ['sqrt', '0.10', '0.20', '0.40', '0.60', '0.80', '1']
+```
+
+Once you are satisfied with the list of possible values for each hyperparameter, then you can make a new grid:
+```
+python3.6 make_hyperparameter_grid_for_grid_search.py
+```
+
+If it works, the script will print the following report to stdout:
+```
+Building grid search combinations.
+Extracted 100 from 60480 possible combinations.
+Saving new grid to hyper_parameter_list.100.txt
+Building grid search combinations.
+Extracted 500 from 60480 possible combinations.
+Saving new grid to hyper_parameter_list.500.txt
+Building grid search combinations.
+Extracted 1000 from 60480 possible combinations.
+Saving new grid to hyper_parameter_list.1000.txt
+Building grid search combinations.
+Extracted 5000 from 60480 possible combinations.
+Saving new grid to hyper_parameter_list.5000.txt
+Building grid search combinations.
+Extracted 10000 from 60480 possible combinations.
+Saving new grid to hyper_parameter_list.10000.txt
+```
+
+A set of multiple hyper_parameter_list.N.txt files is generated, where N is the number of random combinations of hyperparameter values extracted from the full grid (60480 possible combinations in this example).
+If you list the contents of one of these files, it should look like this:
+```
+head hyper_parameter_list.10000.txt
+0.01 0 8 0.07 tanh 0.0001 0 RMSProp FL 0.10
+1e-06 0 8 0.1 tanh 0.001 2 RMSProp FL sqrt
+0.01 0 8 0.01 tanh 0.0001 0 RMSProp FL 0.20
+1e-08 0 6 0.04 tanh 1e-05 3 RMSProp FL sqrt
+1e-08 0 4 0.007 tanh 0.0001 0.5 RMSProp FL sqrt
+1e-07 0 6 0.007 tanh 1e-05 5 RMSProp FL sqrt
+1e-08 0 8 0.01 tanh 1e-05 0.5 RMSProp FL sqrt
+0.0001 0 4 0.007 tanh 0.0001 0 RMSProp FL 0.20
+0.0001 0 4 0.01 tanh 0.0001 0.5 RMSProp FL 0.60
+1e-05 0 10 0.01 tanh 0.0001 1 RMSProp FL 0.80
+```
