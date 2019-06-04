@@ -8,10 +8,10 @@ import random #masking
 import timeit #measure runtime
 
 
-def make_new_grid(l1_arr, l2_arr, beta_arr, rho_arr, act_arr, learning_rate_arr, gamma_arr, opt_array, loss_arr, hs_arr, N=1000):
+def make_new_grid(l1_arr, l2_arr, beta_arr, rho_arr, act_arr, learning_rate_arr, gamma_arr, opt_array, loss_arr, hs_arr, lb_array, rb_array, N=1000):
     print("Building grid search combinations.")
 
-    grid = [l1_arr, l2_arr, beta_arr, rho_arr, act_arr, learning_rate_arr, gamma_arr, opt_array, loss_arr, hs_arr]
+    grid = [l1_arr, l2_arr, beta_arr, rho_arr, act_arr, learning_rate_arr, gamma_arr, opt_array, loss_arr, hs_arr, lb_array, rb_array]
     l = list(itertools.product(*grid))
 
     print("Extracted", N, "from", len(l), "possible combinations.")
@@ -55,9 +55,13 @@ gamma_arr = [0,0.5,1,2,3,5]
 opt_array = ["RMSProp"]
 loss_arr = ["FL"]
 hs_arr = ['sqrt', '0.10', '0.20', '0.40', '0.60', '0.80', '1']
+#new parameters added/edited on june 2019
+lb_array = ['0'] #let them as fixed labels to replace them by custom values later (i.e neighbor block sizes)
+rb_array = ['0'] #let them as fixed labels to replace them by custom values later (i.e neighbor block sizes)
 
 grid_sizes = [100, 500, 1000, 5000, 10000]
+
 for N in grid_sizes:
-    make_new_grid(l1_arr, l2_arr, beta_arr, rho_arr, act_arr,learning_rate_arr, gamma_arr, opt_array, loss_arr, hs_arr, N)
+    make_new_grid(l1_arr, l2_arr, beta_arr, rho_arr, act_arr,learning_rate_arr, gamma_arr, opt_array, loss_arr, hs_arr, lb_array, rb_array, N)
 
 

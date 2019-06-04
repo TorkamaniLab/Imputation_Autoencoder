@@ -24,7 +24,7 @@ import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
-import itertools
+#import itertools
 
 import pandas as pd
 
@@ -58,7 +58,7 @@ import operator #remove entire columns from 2d arrays
 from functools import partial # pool.map with multiple args
 import subprocess as sp #run bash commands that are much faster than in python (i.e cut, grep, awk, etc)
 
-from minepy import pstats, cstats
+#from minepy import pstats, cstats
 
 ###################################OPTIONS#############################################
 
@@ -89,7 +89,7 @@ categorical = "False" #False: treat variables as numeric allele count vectors [0
 split_size = 100 #number of batches
 my_keep_rate = 1 #keep rate for dropout funtion, 1=disable dropout
 kn = 1 #number of k for k-fold CV (kn>=2); if k=1: just run training
-training_epochs = 50 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 500, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
+training_epochs = 10 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 500, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
 #761 permutations will start masking 1 marker at a time, and will finish masking 90% of markers
 last_batch_validation = False #when k==1, you may use the last batch for valitation if you want
 #optimizer_type = "Adam" #Optimizers available now: Adam, RMSProp, GradientDescent
@@ -384,23 +384,57 @@ def process_data(file, categorical="False"):
         MAF_all_var = [item for sublist in MAF_all_var for item in sublist]
         
         
-        global MAF_all_var_vector
-        MAF_all_var_vector = []
-        
-        for i in range(len(MAF_all_var)):
-            MAF_all_var_vector.append(MAF_all_var[i])
-            MAF_all_var_vector.append(MAF_all_var[i])
-            if(categorical==True):
-                MAF_all_var_vector.append(MAF_all_var[i])
+    global MAF_all_var_vector
+    MAF_all_var_vector = []
+
+    #create list of variants that belong to output layer, 1 index per variant
+    keep_indexes=list(range(left_buffer,len(MAF_all_var)-right_buffer))
     
+    #find out the layer structure (either 2 or 3 features per variant)
+    n=2
+    if(categorical==True):
+        n=3
+
+    for i in keep_indexes:
+        MAF_all_var_vector.append(MAF_all_var[i])
+        MAF_all_var_vector.append(MAF_all_var[i])
+        if(categorical==True):
+            MAF_all_var_vector.append(MAF_all_var[i])
+
+    #set start and end index of output layer
+    start = 0
+    if(left_buffer>0):
+        start=left_buffer*n
+    end=(len(MAF_all_var)-right_buffer)*n
+
+    #create list of indexes of variants in output layer, 2 indexes per variant
+    keep_indexes_vector=list(range(start,end))
+            
     global rare_indexes
     global common_indexes
-    
+
+    #generate list of indexes of variants that are rare and common
     rare_indexes = filter_by_MAF_global(results, MAF_all_var, threshold1=rare_threshold1, threshold2=rare_threshold2, categorical=categorical)    
     common_indexes = filter_by_MAF_global(results, MAF_all_var, threshold1=common_threshold1, threshold2=common_threshold2, categorical=categorical)
     
+    #map output layer indexes to the indexes of common/rare variants, generating intersection
+    rare_intersect = [val for val in keep_indexes_vector if val in rare_indexes]
+    common_intersect = [val for val in keep_indexes_vector if val in common_indexes]
+
+    #save intersection replacing old list, subtracting left buffer
+    rare_indexes = [x - start for x in rare_intersect]
+    common_indexes = [x - start for x in common_intersect]
+   
+    #keep MAF info only for output layer variants
+    MAF_all_var_tmp = [] 
+    for i in keep_indexes:
+        MAF_all_var_tmp.append(MAF_all_var[i])
+
+    MAF_all_var = MAF_all_var_tmp
+
     print("ALLELE FREQUENCIES", MAF_all_var)
     print("LENGTH1", len(MAF_all_var)) 
+    print("LENGTH2", len(MAF_all_var_vector)) 
     stop = timeit.default_timer()
     print('Time to calculate MAF (sec): ', stop - start)
     
@@ -779,23 +813,31 @@ def process_testing_data(posfile, infile, ground_truth=False, categorical="False
     print(len(results), len(results[0]), len(results[0][0]) )
 
     print("This file contains {} features (SNPs) and {} samples (subjects)".format(len(results[0]), n_samples))
-    
-    indexes = list(range(len(results[0])))
 
+    indexes = list(range(len(results[0])))
+    
     results = np.asarray(results)
     
-    print("calculating MAFs for testing data...")
-
-
     if(ground_truth==True):
 
-        print("calculating MAFs for testing data...")
+        #create list of variants that belong to output layer, 1 index per variant
+        keep_indexes=list(range(left_buffer,len(MAF_all_var)+left_buffer))
+
+        o_getter = operator.itemgetter(keep_indexes)
+
+        results = list(map(list, map(o_getter, np.copy(results))))
+
+        indexes = list(range(len(results[0])))
+
+        print("Output layer start, end, original length, new length", left_buffer, len(MAF_all_var)+left_buffer, len(results[0])+left_buffer+right_buffer, len(results[0]))
+
+        print("calculating MAFs for testing data (ground truth)...")
 
         global test_MAF_all_var
 
         if(do_parallel_MAF == False):
 
-            test_MAF_all_var = calculate_MAF_global_GPU(indexes, results, categorical)
+            test_MAF_all_var = calculate_MAF_global_test(indexes, results, categorical)
 
         else:
             chunks = chunk(indexes, ncores )
@@ -1525,16 +1567,18 @@ def calculate_MAF_global(indexes, inx, categorical="False"):
 
 
 def calculate_MAF_global_test(indexes, inx, categorical="False"):
+
     j=0
-    if(do_parallel_MAF==True):
-        getter = operator.itemgetter(indexes)
-        x = list(map(list, map(getter, np.copy(inx))))
-    else:
-        x = inx
+    #if(do_parallel_MAF==True):
+    #    getter = operator.itemgetter(intersect)
+    #    x = list(map(list, map(getter, np.copy(inx))))
+    #else:
+    x = inx
     MAF_list = []
     #print("LENGTH", len(x[0]))
+    ########TODO modify this if block bellow, not working if we use one hot encoding, experimental feature
     if(categorical=="True"):
-        while j < (len(x[0])):
+        for j in indexes:
             ref = 0
             alt = 0
             MAF = 0
@@ -1551,10 +1595,10 @@ def calculate_MAF_global_test(indexes, inx, categorical="False"):
             else:
                 MAF=MAF_all_var[j]
             MAF_list.append(MAF)
-            j+=1
+            #j+=1
     elif(categorical=="False"):
         if(loss_type=="CE" or loss_type=="WCE" or loss_type=="FL"):
-            while j < (len(x[0])):
+            for j in indexes:
                 ref = 0
                 alt = 0
                 MAF = 0
@@ -1569,9 +1613,9 @@ def calculate_MAF_global_test(indexes, inx, categorical="False"):
                 else:
                     MAF=MAF_all_var[j]
                 MAF_list.append(MAF)
-                j+=1
+                #j+=1
         else:
-            while j < (len(x[0])):
+            for j in indexes:
                 ref = 0
                 alt = 0
                 MAF = 0
@@ -1583,7 +1627,7 @@ def calculate_MAF_global_test(indexes, inx, categorical="False"):
                 else:
                     MAF=MAF_all_var[j]
                 MAF_list.append(MAF)
-                j+=1
+                #j+=1
     return MAF_list
 
 
@@ -1756,7 +1800,9 @@ def filter_by_MAF(x,y, MAFs, threshold1=0, threshold2=1, categorical=False):
     i = 0
     j = 0
     k = 0   
-    
+    if(verbose>0):
+        print("COOLSUM", len(colsum), ":", colsum[0:13])
+
     while i < len(MAFs):
         if(MAFs[i]>threshold1 and MAFs[i]<=threshold2):
             if(categorical==True or categorical=="True"):
@@ -1767,12 +1813,17 @@ def filter_by_MAF(x,y, MAFs, threshold1=0, threshold2=1, categorical=False):
             elif(categorical==False or categorical=="False"):
                 if(colsum[k]!=0 or colsum[k+1]!=0):
                     indexes_to_keep.append(k)
-                    indexes_to_keep.append(k+1)            
+                    indexes_to_keep.append(k+1)
+                else:
+                    print("WARNING!!!!! INDEX", i, "HAS good MAF but colsum is zero")            
         i += 1
         j += 3
         k += 2
-    
+    if(verbose>0):
+        print("FILTER BY MAF INDEXES TO KEEP:", len(indexes_to_keep), indexes_to_keep)
+
     getter = operator.itemgetter(indexes_to_keep)
+
     filtered_data_x = list(map(list, map(getter, np.copy(x))))
     filtered_data_y = list(map(list, map(getter, np.copy(y))))
     
@@ -1877,33 +1928,67 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     display_step = 1        
 
     # define layer size
-    if(len(data_obs.shape) == 3):
+    if(len(data_obs.shape) == 3): #if alleles are represented as either vectors of counts or presence/absense
         n_input = len(data_obs[0])*len(data_obs[0][0])
-    else:
+        if(left_buffer>0):
+            n_left_buffer = left_buffer*len(data_obs[0][0])
+        if(right_buffer>0):
+            n_right_buffer = right_buffer*len(data_obs[0][0])
+    else: #if doing one hot encoding, experimental
         n_input = len(data_obs[0])*3     # input features N_variants*subfeatures
-    
+        if(left_buffer>0):
+            n_left_buffer = left_buffer*3
+        if(right_buffer>0):
+            n_right_buffer = right_buffer*3
+
     global hsize
 
+    #initially set output layer size equal to input layer size
+    n_output = n_input
+    
+    #if user provides left or right number, the buffer size is subtracted from the output layer size
+    if(left_buffer>0):
+        n_output = n_output-n_left_buffer
+    if(right_buffer>0):
+        n_output = n_output-n_right_buffer
+
+    #enable support for different output layer sizes
+    if(n_input!=n_output):
+        o_indexes = list(range(n_left_buffer, n_left_buffer+n_output))    
+        o_getter = operator.itemgetter(o_indexes)
+
+        if(test_after_train_step == True):
+            #also enable support for different output layer sizes in testing
+
+            #Filtering test data again by MAF thresholds [0-0.005] and [0.005-1], now that ground truth size was adjusted
+            global testing_ground_truth_low_MAF
+            global testing_ground_high_low_MAF
+            _,testing_ground_truth_low_MAF = filter_by_MAF(testing_ground_truth, testing_ground_truth, test_MAF_all_var, 0,0.005, categorical)
+            _,testing_ground_high_low_MAF = filter_by_MAF(testing_ground_truth, testing_ground_truth, test_MAF_all_var, 0.005,1, categorical)
+
+            
+
+    #all hidden layer calculations now are based on the output layer size as reference, not input
     if(hsize=="sqrt"):
-        n_hidden_1=int(round(np.sqrt(n_input))) #if hsize equal 'sqrt' hidden layer size equal to square root of number of input nodes
+        n_hidden_1=int(round(np.sqrt(n_output))) #if hsize equal 'sqrt' hidden layer size equal to square root of number of input nodes
     else:
         hsize=convert_to_float(hsize)
-        n_hidden_1 = int(round(n_input*hsize))  # hidden layer for encoder, equal to input number of features multiplied by a hidden size ratio
+        n_hidden_1 = int(round(n_output*hsize))  # hidden layer for encoder, equal to input number of features multiplied by a hidden size ratio
+
 
     print("Input data shape after coding variables:")
     print(n_input)
     
     print("Network size per layer:")
-    print(n_input, n_hidden_1, n_input)
+    print(n_input, n_hidden_1, n_output)
     
     # Input placeholders
     #with tf.name_scope('input'):
         #tf input
     X = tf.placeholder("float", [None, n_input], name="X")
-    Y = tf.placeholder("float", [None, n_input], name="Y")
-#        else:
-#            X = tf.placeholder("float", [None, n_input], name="newX")
-#            Y = tf.placeholder("float", [None, n_input], name="newY")
+    #now output layer allows different sizes
+    Y = tf.placeholder("float", [None, n_output], name="Y")
+    #Y = tf.placeholder("float", [None, n_input], name="Y")
             
     #As parameters of a statistical model, weights and biases are learned or estimated by minimizing a loss function that depends on our data. 
     #We will initialize them here, their values will be set during the learning process
@@ -1912,7 +1997,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     with tf.name_scope('weights'):
         weights = {
             'encoder_h1': tf.Variable(tf.random_normal([n_input, n_hidden_1], dtype=tf.float64), name="w_encoder_h1"),
-            'decoder_h1': tf.Variable(tf.random_normal([n_hidden_1, n_input], dtype=tf.float64), name="w_decoder_h1"),
+            'decoder_h1': tf.Variable(tf.random_normal([n_hidden_1, n_output], dtype=tf.float64), name="w_decoder_h1"),
             #'decoder_h1': tf.Variable(tf.random_normal([n_hidden_1, n_input], dtype=tf.float64), name="w_decoder_h1"),
         }
         variable_summaries(weights['encoder_h1'])
@@ -1920,7 +2005,8 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     with tf.name_scope('biases'):
         biases = {
             'encoder_b1': tf.Variable(tf.random_normal([n_hidden_1], dtype=tf.float64), name="b_encoder_b1"),
-            'decoder_b1': tf.Variable(tf.random_normal([n_input], dtype=tf.float64), name="b_decoder_b1"),
+            'decoder_b1': tf.Variable(tf.random_normal([n_output], dtype=tf.float64), name="b_decoder_b1"),
+            #'decoder_b1': tf.Variable(tf.random_normal([n_input], dtype=tf.float64), name="b_decoder_b1"),
         }
         variable_summaries(biases['encoder_b1'])
         #weights['encoder_h1']), biases['encoder_b1'])
@@ -2279,9 +2365,10 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 data_masked = flatten_data(sess, np.copy(data_masked), factors)
                 
             data_obs = flatten_data(sess, np.copy(data_obs), factors)
-            
-            
-            
+
+            if(n_input!=n_output):
+                data_obs = list(map(list, map(o_getter, np.copy(data_obs))))
+
             print(data_masked.shape)
             
 
@@ -2367,9 +2454,10 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                             val_y = np.copy(data_obs[val_idx])
                             val_x = data_masked[val_idx]    
                             val_x = flatten_data(sess, np.copy(val_x), factors)
-                            val_y = flatten_data(sess, np.copy(val_y), factors)                                
-                        else:
-                            
+                            val_y = flatten_data(sess, np.copy(val_y), factors)
+                            if(n_input!=n_output):
+                                val_y = list(map(list, map(o_getter, np.copy(val_y))))
+                        else:                            
                             train_x = data_masked
                             train_y = np.copy(data_obs)
                             
@@ -2380,10 +2468,16 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 #after masking, flatten data
                 train_x = flatten_data(sess, np.copy(train_x), factors)
                 train_y = flatten_data(sess, np.copy(train_y), factors)
+
+                if(n_input!=n_output):
+                    train_y = list(map(list, map(o_getter, np.copy(train_y))))
+                    
                     
                 if(kn==1 and shuffle==True):
                     randomize = np.arange(len(train_x))
                     np.random.shuffle(randomize)
+                    train_x = np.asarray(train_x)
+                    train_y = np.asarray(train_y)
                     train_x = train_x[randomize]
                     train_y = train_y[randomize]
                     
@@ -2809,7 +2903,7 @@ def load_test_data():
         
         tf.reset_default_graph()
         my_sess.close()
-        print("Filtering test data by MAF thresholds [0-0.005] and [0.005-1]...")
+        print("Filtering test data by MAF thresholds [0-0.005] and [0.005-1]...")        
         testing_input_low_MAF,testing_ground_truth_low_MAF = filter_by_MAF(testing_input, testing_ground_truth, test_MAF_all_var, 0,0.005, categorical)
         testing_input_high_MAF,testing_ground_high_low_MAF = filter_by_MAF(testing_input, testing_ground_truth, test_MAF_all_var, 0.005,1, categorical)
         
@@ -2835,6 +2929,9 @@ def main():
     global loss_type
     global optimizer_type
     global hsize
+
+    global left_buffer
+    global right_buffer
     
     if(len(sys.argv)==6):
         print("Parsing input file: ")
@@ -2890,6 +2987,9 @@ def main():
             optimizer_type = str(hp_array[i][7])
             loss_type = str(hp_array[i][8])
             hsize=str(hp_array[i][9])
+            #adding support for custom output layer sizes
+            left_buffer=int(hp_array[i][10])
+            right_buffer=int(hp_array[i][11])
             
             if(i==0):
                 data_obs = process_data(sys.argv[1],categorical) #input file, i.e: HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf
@@ -2914,7 +3014,7 @@ def main():
         #sys.argv[3] = [float] L2 hyperparameter value
         #sys.argv[4] = [float] Sparsity beta hyperparameter value
         #sys.argv[5] = [float] Sparseness rho hyperparameter value
-        #sys.argv[6] = [str] Activation function ('anh')
+        #sys.argv[6] = [str] Activation function ('tanh')
         #sys.argv[7] = [float] Learning rate hyperparameter value
         #sys.argv[8] = [float] gamma hyper parameter value
         #sys.argv[9] = [string] optimizer type
@@ -2923,6 +3023,8 @@ def main():
         #sys.argv[12] = [1/846] Initial masking rate
         #sys.argv[13] = [float] Final masking rate
         #sys.argv[14] = [float,string] hidden layer size
+        #sys.argv[15] = [int] left buffer size (number of features to be excluded from output layer start)
+        #sys.argv[16] = [int] right buffer size (number of features to be excluded from output layer end)
 
         l1 = float(sys.argv[2])
         l2 = float(sys.argv[3])
@@ -2933,6 +3035,8 @@ def main():
         gamma = float(sys.argv[8])
         optimizer_type = str(sys.argv[9])
         loss_type = str(sys.argv[10])
+        left_buffer = int(sys.argv[15])
+        right_buffer = int(sys.argv[16])
 
         data_obs = process_data(sys.argv[1],categorical) #input file, i.e: HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf
         load_test_data()
@@ -2977,7 +3081,7 @@ def main():
 
 if __name__ == "__main__":
     result = main()
-    print("LABELS [L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size, rsloss, rloss, sloss, acc, ac_r, ac_c, F1_micro, F1_macro, F1_weighted]") 
+    print("LABELS [L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size, LB, RB, rsloss, rloss, sloss, acc, ac_r, ac_c, F1_micro, F1_macro, F1_weighted]") 
     if(len(sys.argv)==6):
         i = 0
         while(i < len(result)):
