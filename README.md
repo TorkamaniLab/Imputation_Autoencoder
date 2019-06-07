@@ -3,9 +3,14 @@ Deep learning based imputation of genetic variants, this algorithm can be used e
 
 # Configuration
 
+(In Garibaldi)
 - Install pipenv by pip
 ```
-pip install pipenv
+pip install --user pipenv
+```
+- Load module
+```
+module load tensorflow/1.8.0py36-cuda
 ```
 
 In the project directory (with Pipfile and Pipefile.lock)
