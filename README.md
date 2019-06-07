@@ -6,7 +6,10 @@ Deep learning based imputation of genetic variants, this algorithm can be used e
 - Python 3.6
 - Tensorflow 1.13 (tested on 1.08 as well)
 
-# Configuration
+## Configuration using pipenv
+
+We recommend to use pipenv, which is both a package and virtual environment management tool that uses the Pipfile and Pipfile.lock files to achieve these goals (files included in this repository).
+Pipenv handles the virtual environment for you in one default standard way. Below are some basics to get you started.
 
 - If configuring a new server, please install dependencies above. Dependencies are already installed in gpomics.scripps.edu. In garibaldi gpu node, load tensorflow module:
 
@@ -15,21 +18,30 @@ module load python/3.6.3
 module load tensorflow/1.8.0py36-cuda
 ```
 
-- Install pipenv by pip
+- Install pipenv using pip:
 ```
 pip install --user pipenv
 ```
 
-- In the project directory (with Pipfile and Pipefile.lock), install all dependencies by pipenv
+- In the project directory (with Pipfile and Pipefile.lock), install all dependencies by pipenv.
 ```
 export LC_ALL=en_US.utf-8
 export LANG=en_US.utf-8
 pipenv install
 ```
 
-- Enter the virtual shell
+- Enter the virtual shell.
 ```
 pipenv shell
+```
+
+- The Pipfile file provided specifies packages requirements for Python applications. You can install a missing package by simply using:
+```
+pipenv install <package>==<version>
+```
+For example:
+```
+pipenv install pandas==0.23.1
 ```
 
 ## Repository contents
