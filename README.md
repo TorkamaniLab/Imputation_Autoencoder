@@ -30,7 +30,7 @@ export LANG=en_US.utf-8
 pipenv install
 ```
 
-- Enter the virtual shell.
+- Enter the virtual environment shell.
 ```
 pipenv shell
 ```
