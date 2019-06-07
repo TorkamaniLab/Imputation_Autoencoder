@@ -1,40 +1,36 @@
 # Imputation_Autoencoder
 Deep learning based imputation of genetic variants, this algorithm can be used either in grid search training or in training with increasing mask ratio.
 
+## Dependencies
+
+- Python 3.6
+- Tensorflow 1.13 (tested on 1.08 as well)
+
 # Configuration
 
-(In Garibaldi)
+- If configuring a new server, please install dependencies above. Dependencies are already installed in gpomics.scripps.edu. In garibaldi gpu node, load tensorflow module:
+
+```
+module load python/3.6.3
+module load tensorflow/1.8.0py36-cuda
+```
+
 - Install pipenv by pip
 ```
 pip install --user pipenv
 ```
-- Load module
-```
-module load tensorflow/1.8.0py36-cuda
-```
 
-In the project directory (with Pipfile and Pipefile.lock)
-- Install all dependencies by pipenv
+- In the project directory (with Pipfile and Pipefile.lock), install all dependencies by pipenv
 ```
-pipenv install
 export LC_ALL=en_US.utf-8
 export LANG=en_US.utf-8
+pipenv install
 ```
 
 - Enter the virtual shell
 ```
 pipenv shell
 ```
-
-- Add a package (Please specify the version)
-```
-pipenv install [packagename]==0.00.0
-```
-
-## Dependencies
-
-- Python 3.6
-- Tensorflow 1.13 (tested on 1.08 as well)
 
 ## Repository contents
 
