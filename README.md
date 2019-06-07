@@ -7,11 +7,23 @@ Deep learning based imputation of genetic variants, this algorithm can be used e
 ```
 pip install pipenv
 ```
+
+In the project directory (with Pipfile and Pipefile.lock)
 - Install all dependencies by pipenv
 ```
 pipenv install
 export LC_ALL=en_US.utf-8
 export LANG=en_US.utf-8
+```
+
+- Enter the virtual shell
+```
+pipenv shell
+```
+
+- Add a package (Please specify the version)
+```
+pipenv install [packagename]==0.00.0
 ```
 
 ## Dependencies
