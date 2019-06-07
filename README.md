@@ -1,6 +1,19 @@
 # Imputation_Autoencoder
 Deep learning based imputation of genetic variants, this algorithm can be used either in grid search training or in training with increasing mask ratio.
 
+# Configuration
+
+- Install pipenv by pip
+```
+pip install pipenv
+```
+- Install all dependencies by pipenv
+```
+pipenv install
+export LC_ALL=en_US.utf-8
+export LANG=en_US.utf-8
+```
+
 ## Dependencies
 
 - Python 3.6
