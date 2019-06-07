@@ -23,26 +23,20 @@ module load tensorflow/1.8.0py36-cuda
 pip install --user pipenv
 ```
 
-- In the project directory (with Pipfile and Pipefile.lock), install all dependencies by pipenv.
+- In the project directory (with Pipfile and Pipefile.lock), install all dependencies by pipenv. The Pipfile file provided specifies packages requirements for Python applications.
 ```
 export LC_ALL=en_US.utf-8
 export LANG=en_US.utf-8
 pipenv install
 ```
 
-- Enter the virtual environment shell.
+- Enter the virtual environment shell. 
+
 ```
 pipenv shell
 ```
 
-- The Pipfile file provided specifies packages requirements for Python applications. You can install a missing package by simply using:
-```
-pipenv install <package>==<version>
-```
-For example:
-```
-pipenv install pandas==0.23.1
-```
+You are ready to run the imputation autoencoder. For more documentation on pipenv, please refer to: https://docs.pipenv.org/en/latest/
 
 ## Repository contents
 
