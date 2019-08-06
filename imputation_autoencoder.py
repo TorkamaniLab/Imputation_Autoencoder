@@ -20,9 +20,9 @@ import tensorflow as tf
 
 import numpy as np
 
-import matplotlib
-matplotlib.use('agg')
-import matplotlib.pyplot as plt
+#import matplotlib
+#matplotlib.use('agg')
+#import matplotlib.pyplot as plt
 
 #import itertools
 
@@ -36,7 +36,7 @@ from operator import itemgetter
 
 import timeit #measure runtime
 
-from tqdm import tqdm # progress bar
+#from tqdm import tqdm # progress bar
 
 from scipy.stats import pearsonr #remove this, nan bugs are not corrected
 
@@ -58,19 +58,22 @@ import operator #remove entire columns from 2d arrays
 from functools import partial # pool.map with multiple args
 import subprocess as sp #run bash commands that are much faster than in python (i.e cut, grep, awk, etc)
 
+import os
+
 #from minepy import pstats, cstats
 
 ###################################OPTIONS#############################################
 
 #Performance options
 do_parallel = True #load data and preprocess it in parallel
-do_parallel_masking = True #also do the masking in parallel
+do_parallel_masking = False #also do the masking in parallel
+do_numpy_masking = True #also do the masking in parallel
 do_parallel_MAF = True #also do MAF calculation in parallel
 use_cuDF = False #TODO enable data loading directly in the GPU
 
 
 #backup options and reporting options
-save_model = False #[True,False] save final model generated after all training epochs, generating a checkpoint that can be loaded and continued later
+save_model = True #[True,False] save final model generated after all training epochs, generating a checkpoint that can be loaded and continued later
 save_pred = False #[True,False] save predicted results for each training epoch and for k-fold CV
 resuming_step = 1001 #number of first step if recovery mode True
 save_summaries = False #save summaries for plotting in tensorboard
@@ -89,7 +92,7 @@ categorical = "False" #False: treat variables as numeric allele count vectors [0
 split_size = 100 #number of batches
 my_keep_rate = 1 #keep rate for dropout funtion, 1=disable dropout
 kn = 1 #number of k for k-fold CV (kn>=2); if k=1: just run training
-training_epochs = 10 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 500, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
+training_epochs = 1000 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 500, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
 #761 permutations will start masking 1 marker at a time, and will finish masking 90% of markers
 last_batch_validation = False #when k==1, you may use the last batch for valitation if you want
 #optimizer_type = "Adam" #Optimizers available now: Adam, RMSProp, GradientDescent
@@ -109,7 +112,7 @@ mask_preset = False #True: mask from genotype array
 #fixed_masking_rate = True #True: do not increment the ratio of variants masked at each permutation, False: do increment
 #maximum_masking_rate=0
 shuffle = True #Whether shuffle data or not at the begining of training cycle. Not necessary for online data augmentation.
-repeat_cycles = 1 #how many times to repeat the masking rate
+repeat_cycles = 4 #how many times to repeat the masking rate
 
 #Recovery options, online machine learning mode
 #recovery_mode = "False" #False: start model from scratch, True: Recover model from last checkpoint
@@ -117,7 +120,7 @@ repeat_cycles = 1 #how many times to repeat the masking rate
 model_path = './recovery/inference_model-1.ckpt'
 
 #Testing options
-test_after_train_step = True #True: Test on independent dataset after each epoch or permutation; False: run default training without testing
+test_after_train_step = False #True: Test on independent dataset after each epoch or permutation; False: run default training without testing
 #in case test_after_step == True; provide an independent data set for testing
 test_input_path = "../ARIC_PLINK_flagged_chromosomal_abnormalities_zeroed_out_bed.lifted_NCBI36_to_GRCh37.GH.ancestry-1.chr9_intersect1.vcf.gz.9p21.3.recode.vcf"
 test_ground_truth_path = "../c1_ARIC_WGS_Freeze3.lifted_already_GRCh37_intersect1.vcf.gz.9p21.3.recode.vcf"
@@ -267,13 +270,24 @@ def convert_genotypes_to_int(indexes, file, categorical="False"):
 
     return new_df.tolist()
 
+
 #split inut data into chunks so we can prepare batches in parallel
 def chunk(L,nchunks):
     L2 = list()
-    j = round(len(L)/nchunks)
+    j = int(round(len(L)/nchunks-0.5))
+
+    rest=len(L)%nchunks
+
     chunk_size = j
+
     i = 0
+
     while i < len(L):
+
+        if(rest>0):
+            j=j+1
+            rest=rest-1
+
         chunk = L[i:j]
         L2.append(chunk)
         i = j
@@ -281,7 +295,7 @@ def chunk(L,nchunks):
         if(j>len(L)):
             j = len(L)
     return L2
-#new_df = pd.DataFrame() # B) during
+
 
 #parse initial_masking_rate if fraction is provided
 def convert_to_float(frac_str):
@@ -362,28 +376,28 @@ def process_data(file, categorical="False"):
     stop = timeit.default_timer()
     print('Time to load the data (sec): ', stop - start)
     
-    start = timeit.default_timer()
+    start_time = timeit.default_timer()
 
     global MAF_all_var
     
-    if(do_parallel_MAF == False):        
-        
-        MAF_all_var = calculate_MAF_global_GPU(indexes, results, categorical)
-    
+    if(do_parallel_MAF == False):
+
+        #MAF_all_var = calculate_MAF_global_GPU(indexes, results, categorical)
+        MAF_all_var = calculate_ref_MAF(file)
+
     else:
         chunks = chunk(indexes,ncores)
-        
+
         pool = multiprocessing.Pool(ncores)
 
         MAF_all_var = pool.map(partial(calculate_MAF_global, inx=results, categorical=categorical),chunks)
 
         pool.close()
         pool.join()
-        
+
         #merge outputs from all processes, reshaping nested list
         MAF_all_var = [item for sublist in MAF_all_var for item in sublist]
-        
-        
+
     global MAF_all_var_vector
     MAF_all_var_vector = []
 
@@ -435,9 +449,9 @@ def process_data(file, categorical="False"):
     print("ALLELE FREQUENCIES", MAF_all_var)
     print("LENGTH1", len(MAF_all_var)) 
     print("LENGTH2", len(MAF_all_var_vector)) 
-    stop = timeit.default_timer()
-    print('Time to calculate MAF (sec): ', stop - start)
-    
+    stop_time = timeit.default_timer()
+    print('Time to calculate MAF (sec): ', stop_time - start_time)
+
     return results
 
 def filter_by_MAF_global(x, MAFs, threshold1=0, threshold2=1, categorical=False):
@@ -466,33 +480,45 @@ def filter_by_MAF_global(x, MAFs, threshold1=0, threshold2=1, categorical=False)
         
     return indexes_to_keep
 
+
+def read_MAF_file(file):
+
+#   CHR         SNP   A1   A2          MAF  NCHROBS
+#   9   rs1333039    G    C       0.3821    54330
+#   9 rs138885769    T    C    0.0008099    54330
+#   9 rs548022918    T    G     0.000589    54330
+    pd.set_option('display.float_format', '{:.6f}'.format)
+
+    maftable = pd.read_csv(file, sep='\s+', comment='#')
+    maftable['MAF'] = maftable['MAF'].astype(float)
+
+    result = maftable['MAF'].values.tolist()
+    print("#####REF MAF#####",result)
+    return result
+
+def calculate_ref_MAF(refname):
+    #plink --vcf HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf.clean4 --freq 
+
+    result = sp.check_output("plink --vcf "+refname+" --freq --out "+refname, encoding='UTF-8', shell=True)
+
+    MAF_all_var = read_MAF_file(refname+".frq")
+
+    return MAF_all_var
+
+
 def mask_data(indexes, mydata, mask_rate=0.9, categorical="False"):
-    #start = timeit.default_timer()
-    
-    #def duplicate_samples(mydata, n):
-    #    i=1
-    #    while i < n:
-    #        mydata.append(mydata)
-    #        i+=1
-    #    return mydata
-    # random matrix the same shape of your data
-    #print(len(mydata))
     if(disable_masking == True):
         print("No masking will be done for this run... Just learning data structure")
         return mydata, mydata
-    
     #pick samples assigned to worker
     if(do_parallel_masking==True):
         mydata = mydata[indexes]
-        
     original_data = np.copy(mydata)
-    
-    def do_masking(mydata,maskindex):     
+
+    def do_masking(mydata,maskindex): 
         #print("Masking markers...")
         #print(maskindex)
-        
         #print(mydata.shape)
-        
         for i in maskindex:
             #print(len(mydata[i]))
             j = 0
@@ -504,10 +530,9 @@ def mask_data(indexes, mydata, mask_rate=0.9, categorical="False"):
                 else:
                     mydata[j][i]=[0,0]
                 j=j+1
-    
-  
-        return mydata    
-    
+
+        return mydata
+
     nmask = int(round(len(mydata[0])*mask_rate))
     # random mask for which values will be changed
     if(random_masking == True):
@@ -551,33 +576,33 @@ def mask_data(indexes, mydata, mask_rate=0.9, categorical="False"):
 
 # In[ ]:
 def mask_data_per_sample(indexes, mydata, mask_rate=0.9, categorical="False"):
-    #start = timeit.default_timer()
-    # random matrix the same shape of your data
-    #print(len(mydata))
+
     nmask = int(round(len(mydata[0])*mask_rate))
-    # random boolean mask for which values will be changed
-        
-    #for i in range(10):
-    #    print(mydata[i][0:11])
+    my_mask=[0,0]
+
+    if(categorical=="True"):
+        my_mask=-1
+    elif(alt_signal_only==True):
+        my_mask=0
+
     if(do_parallel_masking==True):
         mydata = mydata[indexes]
-    
-    j = 0
-    while j < len(mydata):
-        #redefines which variants will be masked for every new sample
-        maskindex = random.sample(range(0, len(mydata[0]-1)), nmask) 
 
-        for i in maskindex:
-            if(categorical=="True"):
-                mydata[j][i]=-1
-            elif(alt_signal_only==True):
-                mydata[j][i]=0                   
-            else:
-                mydata[j][i]=[0,0]
-        j=j+1
+    if(do_numpy_masking==True):
+        m=len(mydata[0])
+        s=len(mydata)
+        # random matrix of indexes
+        inds=np.stack([np.random.choice(np.arange(m),size=nmask,replace=False) for i in range(s)])
+        mydata[np.arange(s)[:, None], inds] = my_mask
+    else:
+        j = 0
+        while j < len(mydata):
+            #redefines which variants will be masked for every new sample
+            maskindex = random.sample(range(0, len(mydata[0]-1)), nmask) 
+            for i in maskindex:
+                mydata[j][i]=my_mask
+            j=j+1
 
-    #stop = timeit.default_timer()
-    #print('Time to mask the data (sec): ', stop - start)  
     return mydata
 
 def map_genotypes(indexes, refpos, infile, categorical):
@@ -2560,12 +2585,13 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", c, " Accuracy:", a, " Reconstruction loss (" , loss_type, "): ", rl)
 
                 
-                if(save_model==True):
+                if(save_model==True and iepoch==training_epochs):
                     #Create a saver object which will save all the variables
                     saver = tf.train.Saver(max_to_keep=2)
         
                     #Now, save the graph
-                    filename='./inference_model-' + str(ki) + ".ckpt"
+                    model_dir=sys.argv[1]+"_model"
+                    filename=sys.argv[1] + "_model" + "/inference_model-" + str(ki) + ".ckpt"
                     print("Saving model to file:", filename)
                     saver.save(sess, filename)
                 
@@ -2589,7 +2615,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                         test_summary=tf.Summary()
                     
                         test_summary.value.add(tag='accuracy_1', simple_value = new_accuracy)
-                        test_summary.value.add(tag='reconstruction_loss_MSE', simple_value = new_MSE)
+                        #test_summary.value.add(tag='reconstruction_loss_MSE', simple_value = new_MSE)
                         test_summary.value.add(tag='F1_score_micro', simple_value = new_F1[0])
                         test_summary.value.add(tag='F1_score_macro', simple_value = new_F1[1])
                         test_summary.value.add(tag='F1_score_weighted', simple_value = new_F1[2])
@@ -2607,7 +2633,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                         test_summary=tf.Summary()
                     
                         test_summary.value.add(tag='accuracy_1', simple_value = new_accuracy)
-                        test_summary.value.add(tag='reconstruction_loss_MSE', simple_value = new_MSE)
+                        #test_summary.value.add(tag='reconstruction_loss_MSE', simple_value = new_MSE)
                         test_summary.value.add(tag='F1_score_micro', simple_value = new_F1[0])
                         test_summary.value.add(tag='F1_score_macro', simple_value = new_F1[1])
                         test_summary.value.add(tag='F1_score_weighted', simple_value = new_F1[2])
@@ -2916,6 +2942,12 @@ def main():
     print("This is the name of the script: ", sys.argv[0])
     print("Number of arguments: ", len(sys.argv))
     print("The arguments are: " , str(sys.argv))
+
+    if(save_model==True):
+        model_dir=sys.argv[1]+"_model"
+    if(os.path.exists(model_dir)==False):
+        os.mkdir(model_dir)
+
     #mask_rate=0.9
     
     #kf = KFold(n_splits=split_size)      
