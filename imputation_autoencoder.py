@@ -1,4 +1,3 @@
-
 # coding: utf-8
 
 #latest update: enabled support for cross entropy loss (CE), weighted CE, and focal loss, suuport for multiple optimizers
@@ -10,14 +9,11 @@
 #CUDA_VISIBLE_DEVICES=0 /bin/python3.6 ../script_name.py imputed_test_subset.vcf 3_hyper_par_set.txt True 0 0
 
 #sequential mode
-#python3.6 ../10-fold_CV_imputation_autoencoder_from_grid_search_v3_online_data_augmentation_parallel.py ../HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf.clean4 0.039497493748 0.001096668917 0.001 0.021708661247 sigmoid 5.6489904e-05 3 Adam FL False 0 0
+#python3.6 ../10fold_CV_imputation_autoencoder_from_grid_search_v3_online_data_augmentation_parallel.py ../HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf.clean4 0.039497493748 0.001096668917 0.001 0.021708661247 sigmoid 5.6489904e-05 3 Adam FL False 0 0
 
 import math #sqrt
-
 import tensorflow as tf
-
 #from tensorflow.contrib.memory_stats.python.ops.memory_stats_ops import BytesInUse
-
 import numpy as np
 
 #import matplotlib
@@ -66,16 +62,17 @@ import os
 
 #Performance options
 do_parallel = True #load data and preprocess it in parallel
+intra_process_threads = 4 #if the data set is too large, run more chunks per process to avoid mem allocation error
 do_parallel_masking = False #also do the masking in parallel
 do_numpy_masking = True #also do the masking in parallel
-do_parallel_MAF = True #also do MAF calculation in parallel
+do_parallel_MAF = False #also do MAF calculation in parallel, otherwise use PLINK
 use_cuDF = False #TODO enable data loading directly in the GPU
 
 
 #backup options and reporting options
 save_model = True #[True,False] save final model generated after all training epochs, generating a checkpoint that can be loaded and continued later
 save_pred = False #[True,False] save predicted results for each training epoch and for k-fold CV
-resuming_step = 1001 #number of first step if recovery mode True
+resuming_step = 3001 #number of first step if recovery mode True
 save_summaries = False #save summaries for plotting in tensorboard
 detailed_metrics = False #time consuming, calculate additional accuracy metrics for every variant and MAF threshold
 report_perf_by_rarity = True
@@ -92,7 +89,7 @@ categorical = "False" #False: treat variables as numeric allele count vectors [0
 split_size = 100 #number of batches
 my_keep_rate = 1 #keep rate for dropout funtion, 1=disable dropout
 kn = 1 #number of k for k-fold CV (kn>=2); if k=1: just run training
-training_epochs = 1000 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 500, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
+training_epochs = 25000 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 25000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
 #761 permutations will start masking 1 marker at a time, and will finish masking 90% of markers
 last_batch_validation = False #when k==1, you may use the last batch for valitation if you want
 #optimizer_type = "Adam" #Optimizers available now: Adam, RMSProp, GradientDescent
@@ -100,6 +97,13 @@ last_batch_validation = False #when k==1, you may use the last batch for valitat
 #gamma = 5.0 #gamma hyper parameter value, >0 = use WMSE with selected gamma, 0 = do simple MSE as loss function, -1, use Pearson r2 as loss function
 alt_signal_only = False #TODO Wether to treat variables as alternative allele signal only, like Minimac4, estimating the alt dosage
 #hsize = 0.5 #[0.1-1] size ratio for hidden layer, multiplied by number of input nodes
+NH=2 #number of hidden layers, default should be 1. Only 1, 2, or 3 are supported, no more than 3 should be necessary
+all_sparse=True #set all hidden layers as sparse
+average_loss=False #True/False use everage loss, otherwise total sum will be calculated
+
+early_stop_begin=500 #after what epoch to start monitoring the early stop criteria
+window=500 #stop criteria, threshold on how many epochs without improvement in average loss, if no improvent is observed, then interrupt training
+hysteresis=0.0001 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
 
 #Masking options
 replicate_ARIC = False #True: use the same masking pattern as ARIC genotype array data, False: Random masking
@@ -113,11 +117,12 @@ mask_preset = False #True: mask from genotype array
 #maximum_masking_rate=0
 shuffle = True #Whether shuffle data or not at the begining of training cycle. Not necessary for online data augmentation.
 repeat_cycles = 4 #how many times to repeat the masking rate
+#mask_increase = (1+repeat_cycles)/early_stop_begin #amount of masking to increase at each permutation, set to zero and it will be automatically equal to the initial mask
 
 #Recovery options, online machine learning mode
 #recovery_mode = "False" #False: start model from scratch, True: Recover model from last checkpoint
 #path to restore model, in case recovery_mode = True 
-model_path = './recovery/inference_model-1.ckpt'
+#model_path = './recovery/inference_model-1.ckpt'
 
 #Testing options
 test_after_train_step = False #True: Test on independent dataset after each epoch or permutation; False: run default training without testing
@@ -150,24 +155,67 @@ config.gpu_options.allow_growth=True
 #categorical=false is the only mode fully suported now
 #todo: finish implenting support for categorical (onehot encoding), just for comparison purposes
 
+
+
+def convert_gt_to_int(gt,alt_signal_only=False):
+
+    genotype_to_int={'0/0': [1,0], '0|0': [1,0], '0/1': [1,1], '0|1':[1,1], '1/0':[1,1], '1|0':[1,1], '1/1':[0,1], '1|1':[0,1], './0':[0,0], './1':[0,0], './.':[0,0], '0/.':[0,0], '1/.':[0,0]}
+    result=genotype_to_int[gt[0:3]]
+
+    if(alt_signal_only==True):
+        genotype_to_int={'0/0': 0, '0|0': 0.0, '0/1': 1, '0|1':1, '1/0':1, '1|0':1, '1/1':2, '1|1':2, './0':-1, './1':-1, './.':-1, '0/.':-1, '1/.':-1}
+    
+    return result
+
+
+def process_lines(lines):
+
+    result_line=[]
+    pos=0
+    chr=0
+    start_pos='0'
+    first=True
+
+    snp_ids={}
+
+    processed_result=[]
+    
+    for line in lines:
+        #skip comments
+        if(line[0]=='#'):
+            continue
+        if(first==True):
+            chr, start_pos = line.split('\t')[0:2]
+            first=False
+
+        vcf_line=line.split('\t')
+        vcf_line[-1]=vcf_line[-1].replace('\n','')
+        for column in vcf_line[9:]:
+            result=convert_gt_to_int(column[0:3])
+            result_line.append(result)
+            
+        processed_result.append(result_line)
+        
+    return processed_result
+
 def convert_genotypes_to_int(indexes, file, categorical="False"):
-    print("process:", multiprocessing.current_process().name, "arguments:", indexes, ":", file, ":", categorical)
-    #
+    print("process:", multiprocessing.current_process().name, "arguments:", indexes, ":", file)
+
     j=0
-    command = "cut -f"
-    
-    for i in range(len(indexes)):
-        #print(str(indexes[i]))
-        command = command + str(indexes[i]+1)
-        if(i<len(indexes)-1):
-            command = command + ","
-               
-    command = command + " " + file
+    #command = "cut -f"
+    #for i in range(len(indexes)):
+    #    command = command + str(indexes[i]+1)
+    #    if(i<len(indexes)-1):
+    #        command = command + ","
+
+    #command = command + " " + file
     #print(command)
+
+    command = "cut -f " + str(indexes[0]) + "-" + str(indexes[len(indexes)-1]) + " " + file
+
     result = sp.check_output(command, encoding='UTF-8', shell=True)
-    #result = result.stdout
+
     df = []
-    
     first=True
     i=0
     for ln in result.split('\n'):
@@ -211,50 +259,7 @@ def convert_genotypes_to_int(indexes, file, categorical="False"):
             #print j
 
             df[i][j] = str(df[i][j])
-            if(df[i][j].startswith('1|1') or df[i][j].startswith('1/1')):
-                if(categorical=="True" or alt_signal_only==True):
-                    new_df[idx][j] = 2
-                else:
-                    #new_df[idx][j] = np.array([0,2])
-                    new_df[idx][j][0] = 0
-                    #new_df[idx][j] = 0
-                    #idx+=1
-                    #new_df[idx][j] = 2
-                    new_df[idx][j][1] = my_hom
-            elif(df[i][j].startswith('1|0') or df[i][j].startswith('0|1') or df[i][j].startswith('1/0') or df[i][j].startswith('0/1')):
-                if(categorical=="True" or alt_signal_only==True):
-                    new_df[idx][j] = 1
-                else:
-                    #new_df[idx][j] = np.array([1,1])
-                    new_df[idx][j][0] = 1
-                    new_df[idx][j][1] = 1
-                    #new_df[idx][j] = 1
-                    #idx+=1
-                    #new_df[idx][j] = 1
-            elif(df[i][j].startswith('0|0') or df[i][j].startswith('0/0')):
-                if(categorical=="True"  or alt_signal_only==True): 
-                    new_df[idx][j] = 0
-                else:
-                    #new_df[idx][j] = np.array([2,0])
-                    new_df[idx][j][0] = my_hom
-                    new_df[idx][j][1] = 0
-                    #new_df[idx][j] = 2
-                    #idx+=1
-                    #new_df[idx][j] = 0
-            else:
-                if(categorical=="True"):
-                    new_df[idx][j] = -1
-                elif(alt_signal_only==True):
-                    new_df[idx][j] = 0
-                else:
-                    #new_df[idx][j] = np.array([0,0])                     
-                    new_df[idx][j][0] = 0 
-                    new_df[idx][j][1] = 0
-                    #new_df[idx][j] = 0
-                    #idx+=1
-                    #new_df[idx][j] = 0
-                #RR I forgot to mention that we have to take into account possible missing data
-                #RR in case there is missing data (NA, .|., -|-, or anything different from 0|0, 1|1, 0|1, 1|0) = 3
+            new_df[idx][j]=convert_gt_to_int(df[i][j][0:3])
             j += 1
         i += 1
         #pbar.update(1)
@@ -271,30 +276,21 @@ def convert_genotypes_to_int(indexes, file, categorical="False"):
     return new_df.tolist()
 
 
-#split inut data into chunks so we can prepare batches in parallel
-def chunk(L,nchunks):
-    L2 = list()
-    j = int(round(len(L)/nchunks-0.5))
+#split input data into chunks so we can prepare batches in parallel
+#new chunk, works on ND arrays instead of taking indexes
+def chunk(data, ncores=multiprocessing.cpu_count()):
 
-    rest=len(L)%nchunks
+    n_max=10000
+    n_min=100
+    
+    n=int(round(len(data)/ncores-0.5))
+    if(n>n_max):
+        n=n_max
+    if(n<n_min):
+        n=n_min
+    chunks=[data[i:i + n] for i in range(0, len(data), n)]
 
-    chunk_size = j
-
-    i = 0
-
-    while i < len(L):
-
-        if(rest>0):
-            j=j+1
-            rest=rest-1
-
-        chunk = L[i:j]
-        L2.append(chunk)
-        i = j
-        j += chunk_size
-        if(j>len(L)):
-            j = len(L)
-    return L2
+    return chunks
 
 
 #parse initial_masking_rate if fraction is provided
@@ -316,6 +312,7 @@ def convert_to_float(frac_str):
             sign_mult = 1
         return float(leading) + sign_mult * (float(num) / float(denom))
 
+
 def process_data(file, categorical="False"):
      
     #Header and column names start with hashtag, skip those
@@ -329,7 +326,7 @@ def process_data(file, categorical="False"):
     #RR because the first 9 columns are variant information, not genotypes
     print("number of samples: ", n_samples)
     
-    indexes = list(range(9,ncols))
+    indexes = list(range(10,ncols+1)) #bash cut index is 1-based
             
     start = timeit.default_timer()
     
@@ -382,7 +379,7 @@ def process_data(file, categorical="False"):
     
     if(do_parallel_MAF == False):
 
-        #MAF_all_var = calculate_MAF_global_GPU(indexes, results, categorical)
+        #MAF_all_var = calculate_MAF_global(indexes, results, categorical)
         MAF_all_var = calculate_ref_MAF(file)
 
     else:
@@ -609,16 +606,17 @@ def map_genotypes(indexes, refpos, infile, categorical):
     print("process:", multiprocessing.current_process().name, "arguments:", indexes, ":", infile, ":", categorical)
     #
     j=0
-    command = "cut -f"
-    
-    for i in range(len(indexes)):
+    #command = "cut -f"
+    #for i in range(len(indexes)):
         #print(str(indexes[i]))
-        command = command + str(indexes[i]+1)
-        if(i<len(indexes)-1):
-            command = command + ","
-               
-    command = command + " " + infile
+        #command = command + str(indexes[i]+1)
+        #if(i<len(indexes)-1):
+            #command = command + ","
+    #command = command + " " + infile
     #print(command)
+
+    command = "cut -f " + str(indexes[0]) + "-" + str(indexes[len(indexes)-1]) + " " + infile
+
     result = sp.check_output(command, encoding='UTF-8', shell=True)
     
      
@@ -807,7 +805,7 @@ def process_testing_data(posfile, infile, ground_truth=False, categorical="False
         print( len(results), len(results[0]), len(results[0][0]))
 
     else:
-        chunks = chunk(indexes, ncores )        
+        chunks = chunk(indexes, ncores )
 
         pool = multiprocessing.Pool(ncores)
 
@@ -1009,7 +1007,10 @@ def cross_entropy(y_pred, y_true):
     CE_1 = tf.reduce_sum(CE_1)
     CE_0 = tf.reduce_sum(CE_0)
 
-    CE = tf.add(CE_1, CE_0, name='reconstruction_loss')
+    if(average_loss==True):
+        CE = tf.divide(tf.add(CE_1, CE_0), len(y_true)*len(y_true[0]), name='reconstruction_loss')
+    else:
+        CE = tf.add(CE_1, CE_0, name='reconstruction_loss')
 
     return CE
 
@@ -1023,7 +1024,6 @@ def calculate_alpha():
 
     alpha_1 = tf.divide(one, alpha)
     alpha_0 = tf.divide(one, tf.subtract(one,alpha))
-    #alpha_1 = alpha_0
     
     return alpha_0, alpha_1
 
@@ -1045,7 +1045,10 @@ def weighted_cross_entropy(y_pred, y_true):
     WCE_1 = tf.reduce_sum(WCE_per_var_1)
     WCE_0 = tf.reduce_sum(WCE_per_var_0)
 
-    WCE = tf.add(WCE_1, WCE_0, name='reconstruction_loss')
+    if(average_loss==True):
+        WCE = tf.divide(tf.add(WCE_1, WCE_0), len(y_true)*len(y_true[0]), name='reconstruction_loss')
+    else:
+        WCE = tf.add(WCE_1, WCE_0, name='reconstruction_loss')
 
     return WCE
 
@@ -1075,35 +1078,47 @@ def calculate_gamma(y_pred, y_true):
 #ref: https://towardsdatascience.com/handling-imbalanced-datasets-in-deep-learning-f48407a0e758
 def focal_loss(y_pred, y_true):
     
-    #avoid making useless calculations if gamma==0
-    #if(gamma==0):
-    #    WCE = weighted_cross_entropy(y_pred, y_true)
-    #    return WCE
-
     one=tf.cast(1.0, tf.float64)
     
-    #my_gamma=tf.cast(gamma, tf.float64)
-
-    #pt_0, pt_1 = calculate_pt(y_pred, y_true)
-
     CE_0, CE_1 =  calculate_CE(y_pred, y_true)
 
     alpha_0, alpha_1 = calculate_alpha()
-    
-    gamma_0, gamma_1 = calculate_gamma(y_pred, y_true)
 
-    FL_per_var_1 = tf.multiply(CE_1, alpha_1)
-    FL_per_var_0 = tf.multiply(CE_0, alpha_0)
-
+    FL_per_var_1_a = CE_1[:,1::2]
+    FL_per_var_0_a = CE_0[:,1::2]
+    FL_per_var_1_r = CE_1[:,0::2]
+    FL_per_var_0_r = CE_0[:,0::2]
     #avoid useless calculations
     if(gamma>0):
-        FL_per_var_1 = tf.multiply(gamma_1, FL_per_var_1)
-        FL_per_var_0 = tf.multiply(gamma_0, FL_per_var_0)
+        gamma_0, gamma_1 = calculate_gamma(y_pred[:,1::2], y_true[:,1::2])
 
-    FL_1 = tf.reduce_sum(FL_per_var_1)
-    FL_0 = tf.reduce_sum(FL_per_var_0)
+        FL_per_var_1_a = tf.multiply(gamma_1, FL_per_var_1_a)
+        FL_per_var_0_a = tf.multiply(gamma_0, FL_per_var_0_a)
+        
+        gamma_0, gamma_1 = calculate_gamma(y_pred[:,0::2], y_true[:,0::2])
 
-    FL = tf.add(FL_1, FL_0, name='reconstruction_loss')
+        FL_per_var_1_r = tf.multiply(gamma_1, FL_per_var_1_r)
+        FL_per_var_0_r = tf.multiply(gamma_0, FL_per_var_0_r)
+     
+    #extract and reweight alternative allele
+    FL_per_var_1_a = tf.multiply(FL_per_var_1_a, alpha_1[1::2])
+    FL_per_var_0_a = tf.multiply(FL_per_var_0_a, alpha_0[1::2])
+    #extract and reweight reference allele
+    FL_per_var_1_r = tf.multiply(FL_per_var_1_r, alpha_0[0::2])
+    FL_per_var_0_r = tf.multiply(FL_per_var_0_r, alpha_1[0::2])
+ 
+    FL_1_a = tf.reduce_sum(FL_per_var_1_a)
+    FL_0_a = tf.reduce_sum(FL_per_var_0_a)
+    FL_1_r = tf.reduce_sum(FL_per_var_1_r)
+    FL_0_r = tf.reduce_sum(FL_per_var_0_r)
+
+    FL_1 = tf.add(FL_1_a, FL_0_a)
+    FL_0 = tf.add(FL_1_r, FL_0_r)
+
+    if(average_loss==True):
+        FL = tf.divide(tf.add(FL_1, FL_0), tf.multiply(y_pred.get_shape()[0],y_pred.get_shape()[1]) , name='reconstruction_loss')
+    else:
+        FL = tf.add(FL_1, FL_0, name='reconstruction_loss')
 
     return FL
 
@@ -1173,29 +1188,62 @@ def f1_score(y_pred, y_true, sess):
     
     return micro, macro, weighted
 
-    
-    
-def pearson_r_per_var(x, y):
-    
-    mx, my = tf.reduce_mean(x, axis=0), tf.reduce_mean(y, axis=0)
-    xm, ym = tf.subtract(x, mx), tf.subtract(y, my)
-    r_num = tf.reduce_sum(tf.multiply(xm, ym), axis=0)
-    
-    r_num = tf.add(r_num, 1e-12)
-    
-    r_den = tf.sqrt( tf.multiply( tf.reduce_sum(tf.square(xm), axis=0), tf.reduce_sum(tf.square(ym), axis=0) ) )
-    
-    r_den = tf.add(r_den, 1e-12)
+def pearson_r2(x_in, y_in):
 
-    r = tf.divide(r_num, r_den)
-    r = tf.maximum(tf.minimum(r, 1.0), -1.0)
-    #r = tf.where(tf.is_nan(r), tf.zeros_like(r), r)   
-                   
-    mr = tf.reduce_mean(r)
-    
-                   
-    return mr
+    results=dict()
+    r2_results_l = []
+    p_results = []
 
+    x = np.copy(x_in)
+    y = np.copy(y_in)
+
+    #per sample
+    x_sum = np.sum(x, axis=1)
+    y_sum = np.sum(y, axis=1)
+    xy_sum = np.sum(np.multiply(x,y), axis=1)
+    x_squared_sum = np.sum(np.power(x,2), axis=1)
+    y_squared_sum = np.sum(np.power(y,2), axis=1)
+    N=len(y[0])
+
+    num=np.subtract(np.multiply(xy_sum, N), np.multiply(x_sum, y_sum) )
+    den=np.multiply(x_squared_sum, N)
+    den=np.subtract(den, np.power(x_sum,2))
+    den2=np.multiply(y_squared_sum, N)
+    den2=np.subtract(den2, np.power(y_sum,2))
+    den=np.sqrt(np.multiply(den, den2))
+
+    eps=1e-15
+
+    num = np.add(eps,num)
+    den = np.add(eps,den)
+
+    r2_per_sample=np.divide(num,den)
+    r2_per_sample=np.power(r2_per_sample,2)
+    r2_per_sample=np.round(r2_per_sample, decimals=3)
+
+    #per variant
+    x_sum = np.sum(x, axis=0)
+    y_sum = np.sum(y, axis=0)
+    xy_sum = np.sum(np.multiply(x,y), axis=0)
+    x_squared_sum = np.sum(np.power(x,2), axis=0)
+    y_squared_sum = np.sum(np.power(y,2), axis=0)
+
+    results['r2_per_sample']=r2_per_sample
+
+    results['x_sum']=x_sum
+    results['y_sum']=y_sum
+    results['xy_sum']=xy_sum
+    results['x_squared_sum']=x_squared_sum
+    results['y_squared_sum']=y_squared_sum
+
+    #results['mean_x_per_sample']=mean_x
+    #results['mean_y_per_sample']=mean_y
+    #results['var_y_per_sample']=var_y
+    #results['var_x_per_sample']=var_x
+    #results['covar']=covar
+    results['N']=len(y)
+
+    return results    
     
 
 #drop out function will exclude samples from our input data
@@ -1305,51 +1353,6 @@ def decoder(x, func, weights, biases):
     return layer_1
 
 
-#TODO, experimental, debug this function
-def mean_empirical_r2_GPU(x,y, categorical=False):
-    #This calculates exactly the same r2 as the empirical r2hat from minimac3 and minimac4
-    #The estimated r2hat is different
-    j=0
-    mean_correl = 0
-    correls = []
-    
-    #tf.reset_default_graph()
-    
-    sess = tf.Session(config=config) 
-    
-    while j < len(y[0]):
-        if(categorical==False):
-            getter = operator.itemgetter([j+1])
-            x_genotypes = list(map(list, map(getter, np.copy(x))))
-            y_genotypes = list(map(list, map(getter, np.copy(y))))
-            x_genotypes = list(np.array(x_genotypes).flat)
-            y_genotypes = list(np.array(y_genotypes).flat)
-            #print("GGGGGG")
-            #print(x_genotypes)
-            #print(y_genotypes)
-            correl, _ = sess.run(tf.contrib.metrics.streaming_pearson_correlation(x_genotypes, y_genotypes))
-            mean_correl = sess.run( tf.add(mean_correl, tf.divide(correl,len(y[0]))) )
-            j+=2
-        else:
-            x_genotypes = []
-            y_genotypes = []
-            for i in range(len(y)):
-                x_genotypes.append(np.argmax(x[i][j:j+3]))                
-                y_genotypes.append(np.argmax(y[i][j:j+3]))
-            
-            correl, _ = sess.run(tf.contrib.metrics.streaming_pearson_correlation(x_genotypes, y_genotypes))
-            mean_correl = sess.run( tf.add(mean_correl, tf.divide(correl,len(y[0]))) )
-            j+=3
-        correls.append(mean_correl)
-        #print("mean_correl",mean_correl)
-    
-    #tf.reset_default_graph()
-    sess.close()
-    
-    return mean_correl, correls
-
-
-
 def mean_empirical_r2(x,y, categorical=False):
     #This calculates exactly the same r2 as the empirical r2hat from minimac3 and minimac4
     #The estimated r2hat is different
@@ -1457,8 +1460,8 @@ def calculate_MAF_global_GPU(indexes, inx, categorical="False"):
     MAF_list = []
         
     #tf.reset_default_graph()
-    
-    with tf.Session(config=config) as sess:        
+    with tf.compat.v1.Session() as sess:
+    #with tf.Session(config=config) as sess:        
        
         #print("LENGTH", len(x[0]))
         if(categorical=="True"):
@@ -1933,9 +1936,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     beta = tf.cast(beta, tf.float64)
     
     print("Running autoencoder.")
-    # parameters
-    #learning_rate = 0.01
-    #training_epochs = 50
+    
     factors = True
     #subjects, SNP, REF/ALT counts
     if(len(data_obs.shape) == 3):
@@ -2026,7 +2027,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             #'decoder_h1': tf.Variable(tf.random_normal([n_hidden_1, n_input], dtype=tf.float64), name="w_decoder_h1"),
         }
         variable_summaries(weights['encoder_h1'])
-        
+
     with tf.name_scope('biases'):
         biases = {
             'encoder_b1': tf.Variable(tf.random_normal([n_hidden_1], dtype=tf.float64), name="b_encoder_b1"),
@@ -2035,20 +2036,37 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         }
         variable_summaries(biases['encoder_b1'])
         #weights['encoder_h1']), biases['encoder_b1'])
-        
+    if(NH>1):
+        weights_h2 = {
+            'encoder_h1': tf.Variable(tf.random_normal([n_hidden_1, n_hidden_1], dtype=tf.float64), name="w_encoder_h1"),
+            'decoder_h1': tf.Variable(tf.random_normal([n_hidden_1, n_hidden_1], dtype=tf.float64), name="w_decoder_h1"),
+        }
+        biases_h2 = {
+            'encoder_b1': tf.Variable(tf.random_normal([n_hidden_1], dtype=tf.float64), name="b_encoder_b1"),
+            'decoder_b1': tf.Variable(tf.random_normal([n_hidden_1], dtype=tf.float64), name="b_decoder_b1"),
+        }
+
     #print(X.get_shape())
     keep_prob = tf.placeholder("float", None, name="keep_prob") ## RR adding dropout
     
     with tf.name_scope('Wx_plus_b'):
         # construct model
         encoder_op = encoder(X, act_val, l1_val, l2_val, weights, biases, n_hidden_1, keep_rate)
-        #encoder_op = encoder(X, act_val, l1_val, l2_val, weights, biases, n_input, keep_rate)
+
     print(encoder_op)
 
     tf.summary.histogram('activations', encoder_op)
-    
+
+    if(NH==1):
+        y_pred = decoder(encoder_op, act_val, weights, biases)
+    if(NH>=2):
+        encoder_op_h2 = encoder(encoder_op, act_val, l1_val, l2_val, weights_h2, biases_h2, n_hidden_1, keep_rate)
+        y_pred = decoder(encoder_op_h2, act_val, weights, biases)
+    if(NH==3):
+        decoder_op = decoder(encoder_op_h2, act_val, weights_h2, biases_h2)
+        y_pred = decoder(decoder_op, act_val, weights, biases)
+
     encoder_result = encoder_op
-    y_pred = decoder(encoder_op, act_val, weights, biases)
 
     #print(encoder_op)
     # predict result
@@ -2081,13 +2099,28 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     if (act_val == "relu"):
         rho_hat = tf.div(tf.add(rho_hat,1e-10),tf.reduce_max(rho_hat)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
 
+    if(NH>=2 and all_sparse==True):
+        rho_hat2 = tf.reduce_mean(encoder_op_h2,0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
+        if (act_val == "tanh"):
+            rho_hat2 = tf.div(tf.add(rho_hat2,1.0),2.0) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
+        if (act_val == "relu"):
+            rho_hat2 = tf.div(tf.add(rho_hat2,1e-10),tf.reduce_max(rho_hat2)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
+
     rho = tf.constant(rho) #not necessary maybe?
-        
+
     with tf.name_scope('sparsity'):
         sparsity_loss = tf.reduce_mean(KL_Div(rho, rho_hat))
         sparsity_loss = tf.cast(sparsity_loss, tf.float64)
+        sparsity_loss = tf.clip_by_value(sparsity_loss, 1e-10, 1.0) #RR KL divergence, clip to avoid Inf or div by zero
 
-        sparsity_loss = tf.clip_by_value(sparsity_loss, 1e-10, 1.0, name="sparsity_loss") #RR KL divergence, clip to avoid Inf or div by zero
+        if(NH>=2 and all_sparse==True):
+            sparsity_loss2 = tf.cast(tf.reduce_mean(KL_Div(rho, rho_hat2)), tf.float64)
+            sparsity_loss2 = tf.clip_by_value(sparsity_loss2, 1e-10, 1.0) #RR KL divergence, clip to avoid Inf or div by zero
+            sparsity_loss = tf.add(sparsity_loss, sparsity_loss2)
+
+        #sparsity_loss = tf.clip_by_value(sparsity_loss, 1e-10, 1.0, name="sparsity_loss") #RR KL divergence, clip to avoid Inf or div by zero
+        sparsity_loss = tf.cast(sparsity_loss, tf.float64, name="sparsity_loss") #RR KL divergence, clip to avoid Inf or div by zero
+
     tf.summary.scalar('sparsity_loss', sparsity_loss)
 
     # define cost function, optimizers
@@ -2172,8 +2205,8 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     #The RMSprop optimizer restricts the oscillations in the vertical direction. 
     #Therefore, we can increase our learning rate and our algorithm could take larger steps in the horizontal direction converging faster. 
     #ref: https://towardsdatascience.com/a-look-at-gradient-descent-and-rmsprop-optimizers-f77d483ef08b
+    #Converge by accuracy when using factors
     if(recovery_mode=="False"):
-        #Converge by accuracy when using factors
         with tf.name_scope('train'):
             if(optimizer_type=="RMSProp"):
                 if(factors == False):
@@ -2190,7 +2223,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     optimizer = tf.train.AdamOptimizer(learning_rate, name="optimizer").minimize(cost)
                 else:
                     optimizer = tf.train.AdamOptimizer(learning_rate, name="optimizer").minimize(cost_accuracy)
-                    
+        print("Optimizer:", optimizer)
         #save this optimizer to restore it later.
         #tf.add_to_collection("optimizer", optimizer)
         #tf.add_to_collection("Y", Y)
@@ -2215,9 +2248,8 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     if(recovery_mode=="True"):
         tf.reset_default_graph()
 
-    
+#    with tf.compat.v1.Session(config=config) as sess:
     with tf.Session(config=config) as sess:        
-               
         
         if(save_summaries==True):
             
@@ -2234,18 +2266,67 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             run_metadata = tf.RunMetadata()
 
         merged = tf.summary.merge_all()
-        
+
         if(recovery_mode=="True"):
             print("Restoring model from checkpoint")
             #recover model from checkpoint
-            meta_path = model_path + '.meta'    
+            meta_path = model_path + '.meta'
             saver = tf.train.import_meta_graph(meta_path)
+            sess.run(tf.global_variables_initializer())
             saver.restore(sess, model_path)
-            #optimizer = graph.get_tensor_by_name("optimizer:0")
+            #saver.restore(sess, tf.train.latest_checkpoint('HRC.r1-1.EGA.GRCh37.chr22.haplotypes.17274081-17382360.vcf.VMV1_model_round1/'))
             graph = sess.graph
-            #scope_name=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=tf.get_variable_scope().name)
-            #print("scope name", scope_name)
-            optimizer = graph.get_operation_by_name( "train/optimizer" )
+
+            global_name=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=tf.get_variable_scope().name)
+            local_name=tf.get_collection(tf.GraphKeys.LOCAL_VARIABLES, scope=tf.get_variable_scope().name)
+            trainable_vars=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name)
+            '''
+            print("Global collection:", global_name)
+            print("Local collection:", local_name)
+            print("Trainable:", trainable_vars)
+            for i in tf.get_collection(tf.compat.v1.global_variables, scope='train'):
+                print("train:",i)
+            for i in tf.get_collection(tf.compat.v1.global_variables, scope='train'):
+                print("train:",i)
+            for i in tf.get_collection(tf.compat.v1.global_variables, scope='train'):
+                print("train:",i)
+            for i in tf.compat.v1.get_collection(tf.compat.v1.global_variables, scope='train'):
+                print("train1:",i)
+            for i in tf.compat.v1.get_collection(tf.compat.v1.global_variables, scope='train'):
+                print("train1:",i)
+            for i in tf.compat.v1.get_collection(tf.compat.v1.global_variables, scope='train'):
+                print("train1:",i)
+            a=[n.name for n in graph.as_graph_def().node]
+            print("node names:", a)
+
+            print("scope:::", tf.compat.v1.get_default_graph().get_name_scope())
+            all_ops = graph.get_operations()
+            for el in all_ops:
+                print(el)
+            ''' 
+            #optimizer = graph.get_tensor_by_name("optimizer:0")
+
+            a=[n.name for n in graph.as_graph_def().node]
+            if("train/optimizer" in a):
+                 optimizer = graph.get_operation_by_name( "train/optimizer" )
+                 print("Restored", "train/optimizer")
+            elif("train/optimizer/train/optimizer/-apply" in a):
+                 optimizer = graph.get_operation_by_name( "train/optimizer/train/optimizer/-apply" )
+                 print("Restored", "train/optimizer/-apply")
+            else:
+                 print("ERROR OPTIMIZER NOT FOUND IN GRAPH. Nodes available: ", a)
+
+            #train/optimizer/train/optimizer/-apply
+            #Optimizer: name: "train/optimizer"
+            #op: "NoOp"
+            #input: "^train/optimizer/update_weights/w_encoder_h1/ApplyRMSProp"
+            #input: "^train/optimizer/update_weights/w_decoder_h1/ApplyRMSProp"
+            #input: "^train/optimizer/update_biases/b_encoder_b1/ApplyRMSProp"
+            #input: "^train/optimizer/update_biases/b_decoder_b1/ApplyRMSProp"
+            #input: "^train/optimizer/update_dense/kernel/ApplyRMSProp"
+            #input: "^train/optimizer/update_dense/bias/ApplyRMSProp"
+
+
             X = graph.get_tensor_by_name("X:0")
             Y = graph.get_tensor_by_name("Y:0")
             #X = "X:0"
@@ -2262,7 +2343,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             #cost_accuracy = "cost_accuracy:0"
             cost_accuracy = graph.get_tensor_by_name("cost_accuracy:0")
             y_pred = graph.get_tensor_by_name("y_pred:0")
-            
+
             tf.summary.scalar('reconstruction_loss_MSE', reconstruction_loss)
             tf.summary.scalar("final_cost", cost)
             tf.summary.scalar('accuracy', accuracy)
@@ -2285,10 +2366,29 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             #encoder_op = graph.get_tensor_by_name("Wx_plus_b/activation:0")
             
             encoder_op =  graph.get_tensor_by_name("Wx_plus_b/dense/BiasAdd:0")
+
+            '''
+            #alternative to recover optimizer in TF1.4
+            with tf.name_scope('train'):
+                if(optimizer_type=="RMSProp"):
+                    if(factors == False):
+                        optimizer = tf.train.RMSPropOptimizer(learning_rate, name="optimizer").minimize(cost)
+                    else:
+                        optimizer = tf.train.RMSPropOptimizer(learning_rate, name="optimizer").minimize(cost_accuracy)
+                elif(optimizer_type=="GradientDescent"):
+                    if(factors == False):
+                        optimizer = tf.train.GradientDescentOptimizer(learning_rate, name="optimizer").minimize(cost)
+                    else:
+                        optimizer = tf.train.GradientDescentOptimizer(learning_rate, name="optimizer").minimize(cost_accuracy)
+                elif(optimizer_type=="Adam"):
+                    if(factors == False):
+                        optimizer = tf.train.AdamOptimizer(learning_rate, name="optimizer").minimize(cost)
+                    else:
+                        optimizer = tf.train.AdamOptimizer(learning_rate, name="optimizer").minimize(cost_accuracy)
+                print("Optimizer:", optimizer)
+            '''
+
             tf.summary.histogram('activations', encoder_op)
-                       
-            
-            #M = tf.zeros([n_input, n_input], name="MIC")
 
             with tf.name_scope('test'):
                 X_gs_reshaped = tf.expand_dims(X, 0) 
@@ -2301,13 +2401,14 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 tf.summary.image("input", X_gs_reshaped, max_outputs=training_epochs)
                 tf.summary.image("ground_truth", Y_gs_reshaped, max_outputs=training_epochs)
                 tf.summary.image("prediction_output",pred_gs_reshaped, max_outputs=training_epochs)
-    
-            with tf.name_scope('MIC_comming_soon'): #TODO, accelerate and parallelize the calculation of MIC between activations and genotypes, so we can run MIC metrics as a tensor
-                M_gs_reshaped = tf.expand_dims(M, 0)
-                M_gs_reshaped = tf.expand_dims(M_gs_reshaped, -1)
-                tf.summary.image("MIC", M_gs_reshaped, max_outputs=1)
+            if(save_summaries==True):
+
+                with tf.name_scope('MIC_comming_soon'): #TODO, accelerate and parallelize the calculation of MIC between activations and genotypes, so we can run MIC metrics as a tensor
+                    M_gs_reshaped = tf.expand_dims(M, 0)
+                    M_gs_reshaped = tf.expand_dims(M_gs_reshaped, -1)
+                    tf.summary.image("MIC", M_gs_reshaped, max_outputs=1)
             
-            merged = tf.summary.merge_all()
+                merged = tf.summary.merge_all()
             #y_pred = "y_pred:0"
             print("Model restored")
         else:    
@@ -2344,7 +2445,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             data_idx = kf.split(data_obs, data_obs)
 
             
-        mask_rate = 0
+        mask_rate = initial_masking_rate
         indexes = list(range(len(data_obs)))        
        
         if(do_parallel_masking==True and disable_masking==False):
@@ -2396,7 +2497,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
             print(data_masked.shape)
             
-
+        global mask_increase
         for train_idx, val_idx in data_idx:
             
             if(kn>=2):
@@ -2428,7 +2529,11 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             time_epochs = 0
             epoch=0
             cycle_count = -1
-
+            previous_window_avg_cost = 0
+            current_window_avg_cost = 0
+            avg_cost = 0
+            time_to_stop=False
+            
             for iepoch in range(training_epochs+1):
                 
                 if(recovery_mode=="True"):
@@ -2438,14 +2543,19 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     
                 start_epochs = timeit.default_timer()
                 mask_start = timeit.default_timer()
-                                
+
                 if(fixed_masking == False and disable_masking==False):
                     if(do_parallel_masking==True): 
                         pool = multiprocessing.Pool(ncores)
-                    
+
                     if(fixed_masking_rate==False and mask_rate<maximum_masking_rate and cycle_count==repeat_cycles):
-                        mask_rate += initial_masking_rate
-                        
+                        if(mask_increase>0):
+                            mask_rate += mask_increase
+                        else:
+                            mask_rate += initial_masking_rate
+                    if(mask_rate>maximum_masking_rate):
+                        mask_rate=maximum_masking_rate
+
                     if(cycle_count==repeat_cycles):
                         cycle_count = 0
                     else:
@@ -2506,7 +2616,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     train_x = train_x[randomize]
                     train_y = train_y[randomize]
                     
-                                        
+                avg_r2 = 0                        
                 for i in range(total_batch):
                     batch_x = train_x[i*batch_size:(i+1)*batch_size]
                     batch_y = train_y[i*batch_size:(i+1)*batch_size]
@@ -2516,26 +2626,29 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                         gd_start = timeit.default_timer()
                         if(save_summaries==True):
                             if(verbose>0):
-                                summary, _, c, a, rl, g0, g1, myce0, myce1,mypt0, mypt1, mywce,myy = sess.run([merged,optimizer, cost, accuracy, reconstruction_loss, mygamma_0, mygamma_1, ce0, ce1,pt0, pt1, wce, y_pred], feed_dict={X: batch_x, Y: batch_y} )     
+                                summary, _, c, a, rl, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = sess.run([merged,optimizer, cost, accuracy, reconstruction_loss, mygamma_0, mygamma_1, ce0, ce1,pt0, pt1, wce, y_pred], feed_dict={X: batch_x, Y: batch_y} )     
                             else:
-                                summary, _, c, a, rl  = sess.run([merged,optimizer, cost, accuracy, reconstruction_loss], feed_dict={X: batch_x, Y: batch_y} )     
+                                summary, _, c, a, rl, myy  = sess.run([merged,optimizer, cost, accuracy, reconstruction_loss, y_pred], feed_dict={X: batch_x, Y: batch_y} )     
                             train_writer.add_run_metadata(run_metadata, 'k%03d-step%03d-batch%04d' % (ki, epoch, i) )
                             train_writer.add_summary(summary, epoch)
                         else:
                             if(verbose>0):
-                                _, c, a, rl, g0, g1, myce0, myce1,mypt0, mypt1, mywce,myy = sess.run([optimizer, cost, accuracy, reconstruction_loss, mygamma_0, mygamma_1, ce0, ce1, pt0, pt1, wce, y_pred], feed_dict={X: batch_x, Y: batch_y} )     
+                                _, c, a, rl, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = sess.run([optimizer, cost, accuracy, reconstruction_loss, mygamma_0, mygamma_1, ce0, ce1, pt0, pt1, wce, y_pred], feed_dict={X: batch_x, Y: batch_y} )     
                             else:
-                                _, c, a, rl = sess.run([optimizer, cost, accuracy, reconstruction_loss], feed_dict={X: batch_x, Y: batch_y} )     
+                                _, c, a, rl, myy = sess.run([optimizer, cost, accuracy, reconstruction_loss, y_pred], feed_dict={X: batch_x, Y: batch_y} )     
                         gd_stop = timeit.default_timer()
                         gd_time += gd_stop-gd_start
                             
                     else:
                         if(save_summaries==True):
-                            mysummary, a, c, _, _, rl  = sess.run([merged,accuracy, cost, y_pred, encoder_op, reconstruction_loss], feed_dict={X: batch_x, Y: batch_y} )                
+                            mysummary, a, c, myy, _, rl  = sess.run([merged,accuracy, cost, y_pred, encoder_op, reconstruction_loss], feed_dict={X: batch_x, Y: batch_y} )                
                             valid_writer.add_summary(mysummary, epoch )
                         else:
-                            a, c, rl = sess.run([accuracy, cost, reconstruction_loss], feed_dict={X: batch_x, Y: batch_y} )
-                    
+                            a, c, rl, myy = sess.run([accuracy, cost, reconstruction_loss, y_pred], feed_dict={X: batch_x, Y: batch_y} )
+                    my_r2_tmp = pearson_r2(myy, batch_y)
+                    avg_r2 += np.sum(my_r2_tmp['r2_per_sample'])/len(my_r2_tmp['r2_per_sample'])/total_batch
+                    avg_cost+=c/total_batch/window
+                ############BATCH ENDS HERE                            
                 if(save_pred==True and ki==1): #if using cluster run for all k fold: if(save_pred==True):
                     #This generates 1GB files per epoch per k-fold iteration, at least 5TB of space required, uncoment when using the HPC cluster with big storage
                     #my_pred = sess.run([y_pred], feed_dict={X: train_x, Y: train_y} )
@@ -2558,20 +2671,38 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                         if(save_summaries==True):
                             mysummary, _, _, genotypes, activations = sess.run([merged,X,y_pred,y_true, encoder_op], feed_dict={X: train_x, Y: train_y} )
                             valid_writer.add_summary(mysummary, epoch ) 
-                        
-                            
-                                      
 
                 #print("Calculating MIC") 
                 #mic_c, tic_c =  cstats(genotypes, activations, est="mic_e")
                 #M.assign(mic_e).eval() # assign_sub/assign_add is also available.
                 #mysummary, _ = sess.run([merged, M] )
                 #valid_writer.add_summary(mysummary, epoch )
-
-                                      
+                if(epoch==early_stop_begin):
+                    #mask_increase
+                    mask_increase = 0.2*(repeat_cycles+1)/window
+                    mask_rate
+                    mask_rate=0.8
+                if(epoch>early_stop_begin and epoch % window == 0):
+                    #mask_rate
+                    mask_rate=0.8
+                    
+                    if(previous_window_avg_cost==0):                       
+                        previous_window_avg_cost=avg_cost/(epoch/window)
+                        current_window_avg_cost=avg_cost/(epoch/window)
+                        print("previous_window_avg_cost: ", previous_window_avg_cost, " current_window_avg_cost: ", current_window_avg_cost)
+                    else:
+                        current_window_avg_cost=avg_cost
+                        print("previous_window_avg_cost: ", previous_window_avg_cost, " current_window_avg_cost: ", current_window_avg_cost)
+                        if(current_window_avg_cost>(previous_window_avg_cost-(hysteresis*previous_window_avg_cost))):
+                            time_to_stop=True
+                        else:
+                            previous_window_avg_cost=current_window_avg_cost
+                    avg_cost=0
+                    
+                                                      
 ################Epoch end here
                 if(verbose>0):
-                    print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", c, " Accuracy:", a, " Reconstruction loss (" , loss_type, "): ", rl, "ce0:", myce0, "ce1:", myce1)
+                    print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", c, " Accuracy:", a, " Reconstruction loss (" , loss_type, "): ", rl, "ce0:", myce0, "ce1:", myce1, "sr2:", avg_r2)
                     print("Shape pt0:", mypt0)
                     print("Shape pt1:", mypt1)
                     print("Shape g0:", g0)
@@ -2582,16 +2713,19 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     print("fl:", rl)
                     print("myy:", myy)
                 else:
-                    print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", c, " Accuracy:", a, " Reconstruction loss (" , loss_type, "): ", rl)
+                    print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", c, " Accuracy:", a, " s_r2:", avg_r2, " Reconstruction loss (" , loss_type, "): ", rl)
 
                 
-                if(save_model==True and iepoch==training_epochs):
+                if(save_model==True and (iepoch==training_epochs or epoch % window == 0) ):
                     #Create a saver object which will save all the variables
                     saver = tf.train.Saver(max_to_keep=2)
-        
+                    
+                    suffix = "best"
+                    if(time_to_stop==True):
+                        suffix = "last"
                     #Now, save the graph
-                    model_dir=sys.argv[1]+"_model"
-                    filename=sys.argv[1] + "_model" + "/inference_model-" + str(ki) + ".ckpt"
+                    model_dir = os.path.basename(sys.argv[1])+"_model"
+                    filename = model_dir + "/inference_model-" + suffix + ".ckpt"
                     print("Saving model to file:", filename)
                     saver.save(sess, filename)
                 
@@ -2651,10 +2785,13 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     #test_writer_high_MAF.add_summary(test_summary, epoch )
            
                     #print("Test loss:", test_cost, " Test accuracy [0.005-1]:", test_accuracy) 
-                    
+                  
                 stop_epochs = timeit.default_timer()
                 time_epochs += stop_epochs-start_epochs
-                
+
+                if(time_to_stop==True):
+                    print("Stop criteria satisfied: epoch =", epoch, "previous_window_avg_cost =", previous_window_avg_cost, "current_window_avg_cost =", current_window_avg_cost)
+                    break  
         
             if(save_pred==True and kn>=2): #if kn<2, validation and training are the same
                 fname = "k-" + str(ki) + "_val-obs.out"
@@ -2701,12 +2838,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 
                     print("Accuracy per veriant...")
                     my_acc_t[0], acc_per_m = accuracy_maf_threshold(sess, my_pred, val_y, MAF_all_var, 0, 1, factors)
-                    #my_acc_t[1], _ = accuracy_maf_threshold(sess, my_pred, val_y, 0, 0.005, factors)
-                    #my_acc_t[2], _ = accuracy_maf_threshold(sess, my_pred, val_y, 0.005, 1, factors)
-                    #my_acc_t[3], _ = accuracy_maf_threshold(sess, my_pred, val_y, 0, 0.001, factors)
-                    #my_acc_t[4], _ = accuracy_maf_threshold(sess, my_pred, val_y, 0.001, 1, factors)
-                    #my_acc_t[5], _ = accuracy_maf_threshold(sess, my_pred, val_y, 0, 0.01, factors)
-                    #my_acc_t[6], _ = accuracy_maf_threshold(sess, my_pred, val_y, 0.01, 1, factors)
+
                     print("MSE per veriant...")
                     my_MSE, MSE_list = MSE_maf_threshold(sess, my_pred, val_y, MAF_all_var, 0, 1, factors)
 
@@ -2715,7 +2847,6 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     mean_r2hat_est, my_r2hat_est = mean_estimated_r2(val_y, factors)
                     print("Empirical r2hat per veriant...")
                     mean_r2hat_emp, my_r2hat_emp = mean_empirical_r2(val_x, val_y, factors)
-
 
             else:
                 if(save_summaries==True):
@@ -2730,6 +2861,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     my_cacc = 0
                     my_F1 = [0,0,0]
                     my_acc_t = [0,0,0,0]
+                    my_r2 = 0
 
                     for i in range(total_batch):
                         print("Calculating F1 for batch", i)
@@ -2744,6 +2876,9 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                         my_cacc += my_cacc_tmp/total_batch
                         
                         my_F1_tmp = f1_score(my_pred, batch_y, sess)
+                        my_r2_tmp = pearson_r2(my_pred, batch_y)
+                        #print(i,total_batch,my_r2_tmp['r2_per_sample'])
+                        my_r2 += np.sum(my_r2_tmp['r2_per_sample'])/len(my_r2_tmp['r2_per_sample'])/total_batch
                         
                         my_F1[0] += my_F1_tmp[0]/total_batch
                         my_F1[1] += my_F1_tmp[1]/total_batch
@@ -2752,11 +2887,6 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                         #RARE VS COMMON VARS
                         print("Calculating accuracy per MAF threshold for batch", i)
                         if(report_perf_by_rarity==True):
-                            #my_acc_tmp, _ = accuracy_maf_threshold(sess, my_pred, batch_y, MAF_all_var, 0.005, 1, factors)
-                            #my_acc_t[0] += my_acc_tmp/total_batch
-                            #my_acc_tmp, _ = accuracy_maf_threshold(sess, my_pred, batch_y, 0, 0.005, factors)
-                            #my_acc_t[1] += my_acc_tmp/total_batch
-
                             my_acc_tmp, _ = accuracy_maf_threshold_global(sess, my_pred, batch_y, rare_indexes)
                             my_acc_t[2] += my_acc_tmp/total_batch
                             my_acc_tmp, _ = accuracy_maf_threshold_global(sess, my_pred, batch_y, common_indexes)
@@ -2768,6 +2898,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 else:
                     my_cost, my_rloss, my_sloss, my_acc, my_cacc,my_pred  = sess.run([cost, reconstruction_loss, sparsity_loss, accuracy, cost_accuracy,y_pred], feed_dict={X: train_x, Y: train_y})
                     my_F1 = f1_score(my_pred, train_y, sess)
+                    my_r2='NA'
                     if(report_perf_by_rarity==True):
                         #my_acc_t[0], _ = accuracy_maf_threshold(sess, my_pred, val_y, MAF_all_var, 0.005, 1, factors)
                         #my_acc_t[1], _ = accuracy_maf_threshold(sess, my_pred, val_y, 0, 0.005, factors)
@@ -2781,7 +2912,8 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 print("Accuracy [MAF 0-0.01]:", my_acc_t[2])
                 print("Accuracy [MAF 0.01-1]:", my_acc_t[3])
                 print("F1 score [MAF 0-1]:", my_F1)
-              
+                print("R-squared per sample:", my_r2)
+                
                 r_report_stop = timeit.default_timer()
                 print("Time to calculate accuracy (rare versus common variants:", r_report_stop-r_report_start)
                 r_report_time += r_report_stop-r_report_start
@@ -2801,12 +2933,6 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     #print(len(train_x[0]))
                     print("Accuracy per veriant...")
                     my_acc_t[0], acc_per_m = accuracy_maf_threshold(sess, my_pred, train_y, MAF_all_var, 0, 1, factors)
-                    #my_acc_t[1], _ = accuracy_maf_threshold(sess, my_pred, train_y, 0, 0.005, factors)
-                    #my_acc_t[2], _ = accuracy_maf_threshold(sess, my_pred, train_y, 0.005, 1, factors)
-                    #my_acc_t[3], _ = accuracy_maf_threshold(sess, my_pred, train_y, 0, 0.001, factors)
-                    #my_acc_t[4], _ = accuracy_maf_threshold(sess, my_pred, train_y, 0.001, 1, factors)
-                    #my_acc_t[5], _ = accuracy_maf_threshold(sess, my_pred, train_y, 0, 0.01, factors)
-                    #my_acc_t[6], _ = accuracy_maf_threshold(sess, my_pred, train_y, 0.01, 1, factors)
 
                     print("MSE per veriant...")
                     my_MSE, MSE_list = MSE_maf_threshold(sess, my_pred, train_y, MAF_all_var, 0, 1, factors)
@@ -2816,10 +2942,6 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     print("Emprirical r2hat per veriant...")
                     mean_r2hat_emp, my_r2hat_emp = mean_empirical_r2(train_x, train_y, factors)
                                
-            print("Maximum VRAM used: ")
-            # maximum across all sessions and .run calls so far
-            #print(sess.run(tf.contrib.memory_stats.MaxBytesInUse()))
-            #print(sess.run(bytes_in_use))
 
             #print("MAF", len(my_MAF_list), "acc", len(acc_per_m), "r2emp", len(my_r2hat_emp), "r2est", len(my_r2hat_emp), "MSE", len(MSE_list))
             if(detailed_metrics==True):
@@ -2855,23 +2977,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 break
             else:            
                 print("K-fold iteration: ", ki, " of ", split_size, ".")
-        
-        #print("Mean accuracy for MAF 0-1 range:", mean_acc_t[0])
-        #print("Mean accuracy for MAF 0-0.005 range:", mean_acc_t[1])
-        ##print("Mean accuracy for MAF 0.005-1 range:", mean_acc_t[2])
-        #print("Mean accuracy for MAF 0-0.001 range:", mean_acc_t[3])
-        #print("Mean accuracy for MAF 0.001-1 range:", mean_acc_t[4])
-        #print("Mean accuracy for MAF 0-0.01 range:", mean_acc_t[5])
-        #print("Mean accuracy for MAF 0.01-1 range:", mean_acc_t[6])
-        #print("MSE MAF 0-1 range:", my_MSE)
-        #print("r2hat est. MAF 0-1 range:", mean_r2hat_est)
-        #print("r2hat emp. MAF 0-1 range:", mean_r2hat_emp)
-
-
-        #pbar.close()
-
-        print("Optimization finished!")
-        
+       
     stop = timeit.default_timer()
     print('Time to run all training (sec): ', stop - start)
     print('Time to run all epochs (sec): ', time_epochs)
@@ -2897,7 +3003,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     sess.close()
     # return the minimum loss of this combination of L1, L2, activation function, beta, rho on a dataset
     #return minLoss, min_reconstruction_loss, min_sparsity_loss, max_correl
-    return mean_cost, my_rloss, mean_sloss, mean_acc, my_acc_t[2], my_acc_t[3], mean_F1[0], mean_F1[1], mean_F1[2]
+    return mean_cost, my_rloss, mean_sloss, mean_acc, my_acc_t[2], my_acc_t[3], mean_F1[0], mean_F1[1], mean_F1[2], my_r2
 
 
 # In[ ]:
@@ -2918,9 +3024,7 @@ def load_test_data():
         print("Loading and mapping testing data ground truth file...")
         testing_ground_truth = process_testing_data(test_position_path, test_ground_truth_path, ground_truth=True) #new_df_obs
         #print(testing_ground_truth[0][0:300])
-
-        
-        
+               
         with tf.Session(config=config) as my_sess:
             testing_input = flatten_data(my_sess, testing_input)
             testing_ground_truth = flatten_data(my_sess, testing_ground_truth)
@@ -2944,9 +3048,9 @@ def main():
     print("The arguments are: " , str(sys.argv))
 
     if(save_model==True):
-        model_dir=sys.argv[1]+"_model"
-    if(os.path.exists(model_dir)==False):
-        os.mkdir(model_dir)
+        model_dir=os.path.basename(sys.argv[1])+"_model"
+        if(os.path.exists(model_dir)==False):
+            os.mkdir(model_dir)
 
     #mask_rate=0.9
     
@@ -2964,17 +3068,26 @@ def main():
 
     global left_buffer
     global right_buffer
+    global model_path
     
-    if(len(sys.argv)==6):
+    global mask_increase
+
+    if(len(sys.argv)==6 or len(sys.argv)==7):
         print("Parsing input file: ")
             #Arguments
             #sys.argv[1] = [str] input file (HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf)
             #sys.argv[2] = [str] hyperparameter list file (mylist.txt)
             #sys.argv[3] = [True,False] Recovery mode, default is False
-            #sys.argv[4] = [1/846] Initial masking rate               
+            #sys.argv[4] = [1/846] Initial masking rate
             #sys.argv[5] = [0.98] Final masking rate
-        
+            #sys.argv[6] = [str] only needed if recovery mode is True, path to the .ckpt file
+
         recovery_mode = sys.argv[3]
+        #If enabling recovery mode to resume training, provide model path after masking rates, as last parameter
+        if(recovery_mode=="True"):
+            #path to the .ckpt file, example: ./recovery/inference_model-1.ckpt
+            model_path=sys.argv[6]
+
         initial_masking_rate = convert_to_float(sys.argv[4])
         maximum_masking_rate = convert_to_float(sys.argv[5])
 
@@ -2987,17 +3100,18 @@ def main():
             fixed_masking_rate = True
         else:
             fixed_masking_rate = False
-        
+            if(early_stop_begin==0):
+                den=window
+            else:
+                den=early_stop_begin
+            mask_increase = (maximum_masking_rate-initial_masking_rate)*(1+repeat_cycles)/den
+
         print("disable_masking =", disable_masking)
-
         print("fixed_masking_rate =", fixed_masking_rate)
-        
         print("initial_masking_rate =", initial_masking_rate)
-        
         print("maximum_masking_rate =", maximum_masking_rate)
-
-
         print("reading hyperparameter list from file: ", sys.argv[2])
+
         hp_array = []
         result_list = []
 
@@ -3006,7 +3120,6 @@ def main():
                 hp_array.append(line.split())
         i = 0
 
-        
         while(i < len(hp_array)):
             
             l1 = float(hp_array[i][0])
@@ -3031,8 +3144,8 @@ def main():
 
             tmp_list = hp_array[i]
             print("Starting autoencoder training... Parameters:", tmp_list)
-            my_cost, my_rloss, my_sloss, my_acc,  my_racc, my_cacc, my_micro, my_macro, my_weighted  = run_autoencoder(lr, training_epochs, l1, l2, act, beta, rho, keep_rate, data_obs)
-            tmpResult = [my_cost, my_rloss, my_sloss, my_acc,  my_racc, my_cacc, my_micro, my_macro, my_weighted]
+            my_cost, my_rloss, my_sloss, my_acc,  my_racc, my_cacc, my_micro, my_macro, my_weighted, my_r2  = run_autoencoder(lr, training_epochs, l1, l2, act, beta, rho, keep_rate, data_obs)
+            tmpResult = [my_cost, my_rloss, my_sloss, my_acc,  my_racc, my_cacc, my_micro, my_macro, my_weighted, my_r2]
             tmp_list.extend(tmpResult)
             result_list.append(tmp_list)
             i += 1
@@ -3077,6 +3190,10 @@ def main():
         tmp_list = sys.argv[2:]
 
         recovery_mode = sys.argv[11]
+        if(recovery_mode=="True"):
+            #path to the .ckpt file, example: ./recovery/inference_model-1.ckpt
+            model_path=sys.argv[17]
+
         initial_masking_rate = convert_to_float(sys.argv[12])
         maximum_masking_rate = convert_to_float(sys.argv[13])
 
@@ -3092,7 +3209,12 @@ def main():
             fixed_masking_rate = True
         else:
             fixed_masking_rate = False
-
+            if(early_stop_begin==0):
+                den=window
+            else:
+                den=early_stop_begin
+            mask_increase = (maximum_masking_rate-initial_masking_rate)*(1+repeat_cycles)/den
+            
         print("disable_masking =", disable_masking)
 
         print("fixed_masking_rate =", fixed_masking_rate)
@@ -3101,9 +3223,9 @@ def main():
         
         print("maximum_masking_rate =", maximum_masking_rate)
 
-        my_cost, my_rloss, my_sloss, my_acc, my_racc, my_cacc, my_micro, my_macro, my_weighted = run_autoencoder(lr, training_epochs, l1, l2, act, beta, rho, keep_rate, data_obs)
+        my_cost, my_rloss, my_sloss, my_acc, my_racc, my_cacc, my_micro, my_macro, my_weighted, my_r2 = run_autoencoder(lr, training_epochs, l1, l2, act, beta, rho, keep_rate, data_obs)
 
-        tmpResult = [my_cost, my_rloss, my_sloss, my_acc, my_racc, my_cacc, my_micro, my_macro, my_weighted]
+        tmpResult = [my_cost, my_rloss, my_sloss, my_acc, my_racc, my_cacc, my_micro, my_macro, my_weighted, my_r2]
 
         tmp_list.extend(tmpResult)
         
@@ -3113,7 +3235,7 @@ def main():
 
 if __name__ == "__main__":
     result = main()
-    print("LABELS [L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size, LB, RB, rsloss, rloss, sloss, acc, ac_r, ac_c, F1_micro, F1_macro, F1_weighted]") 
+    print("LABELS [L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size, LB, RB, rsloss, rloss, sloss, acc, ac_r, ac_c, F1_micro, F1_macro, F1_weighted, sr2]") 
     if(len(sys.argv)==6):
         i = 0
         while(i < len(result)):
