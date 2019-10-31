@@ -190,3 +190,77 @@ head hyper_parameter_list.10000.txt
 0.0001 0 4 0.01 tanh 0.0001 0.5 RMSProp FL 0.60 0 0
 1e-05 0 10 0.01 tanh 0.0001 1 RMSProp FL 0.80 0 0
 ```
+
+
+## Running Inference
+
+Once you ran training, a pre-trained model will be saved into a tensorflow checkpoint file and meta graph.
+For running inference using the pre-trained model and a new input file:
+
+```
+python3 Imputation_inference_function_only_with_dosage.py
+
+Usage: python3 Imputation_inference_function_only_with_dosage.py reference.1-5 genotype_array model_file output_file_name
+
+       reference.1-5:       first 5 columns of reference panel VCF file (chromosome position rsID REF ALT), used to build imputed file
+       genotype_array:      genotype array file in VCF format, file to be imputed
+       model_file:          pretrained model directory path (just directory path, no file name and no extension required
+       output_file_name:    (optional) a name for the output file, imputed file in VCF format, same name prefix as input if no out name is provided
+```
+
+
+For example, using HRC dataset:
+
+```
+python3 Imputation_inference_function_only_with_dosage.py HRC.r1-1.EGA.GRCh37.chr22.haplotypes.20227467-20247236.vcf.VMV1.024.1-5 HRC.r1-1.EGA.GRCh37.chr22.haplotypes.20227467-20247236.vcf.VMV1.024.masked HRC.r1-1.EGA.GRCh37.chr22.haplotypes.20227467-20247236.vcf.VMV1_model HRC.r1-1.EGA.GRCh37.chr22.haplotypes.20227467-20247236.vcf.VMV1.024.masked.autoencoder_imputed_round1.vcf
+
+```
+
+The standard output message should look like:
+
+```
+Time to do inference (sec):  0.27009798999642953
+RESULT: HRC.r1-1.EGA.GRCh37.chr22.haplotypes.20227467-20247236.vcf.VMV1/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.20227467-20247236.vcf.VMV1.024.masked.autoencoder_imputed_round1.vcf
+Time to write output file (sec):  0.03913883300265297
+
+```
+
+Where the *.autoencoder_imputed_round1.vcf file is the imputed result in VCF format:
+
+```
+##fileformat=VCFv4.1
+##filedate=2019-10-30
+##source=Imputation_autoencoder
+##contig=<ID=22>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=DS,Number=1,Type=Float,Description="Estimated Alternate Allele Dosage : [P(0/1)+2*P(1/1)]">
+##FORMAT=<ID=Paa,Number=1,Type=Float,Description="Imputation probability for homozigous reference : Pa=y_pred[i][j]*(1-y_pred[i][j+1])">
+##FORMAT=<ID=Pab,Number=1,Type=Float,Description="Imputation probability for heterozigous : Pab=y_pred[i][j]*y_pred[i][j+1]">
+##FORMAT=<ID=Pbb,Number=1,Type=Float,Description="Imputation probability for homozigous alternative : Pb=(1-y_pred[i][j])*y_pred[i][j+1]">
+##FORMAT=<ID=AP,Number=1,Type=Float,Description="Predicted presence of reference allele (autoencoder raw output)">
+##FORMAT=<ID=BP,Number=1,Type=Float,Description="Predicted presence of alternative allele (autoencoder raw output)">
+#CHROM  POS     ID      REF     ALT     QUAL    FILTER  INFO    FORMAT  1KGTEST
+22      20227551        rs701430        A       G       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 1/1:1.9521:2.1671086955780534e-10:1.9123217699738734e-18:8.824300122031762e-09:2.1671087147012713e-10:8.824300123944084e-09
+22      20227563        rs114074551     A       G       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20227595        rs73877201      G       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20227689        rs573952894     G       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20227958        rs191917535     A       G       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20227971        rs530513657     C       T       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228055        rs149600212     G       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228195        rs117150443     G       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228238        rs567146400     G       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228365        rs559206462     G       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228388        rs60421391      G       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228465        rs701429        G       T       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/1:1.0:0.0:1.0:0.0:1.0:1.0
+22      20228483        .       C       T       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228486        rs58660506      C       T       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228487        rs887764        G       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0:1:0:0:1:0
+22      20228542        rs701428        A       G       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 1/1:2.0:0.0:0.0:1.0:0.0:1.0
+22      20228557        rs115516414     C       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228594        rs114995292     G       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228616        rs546557732     C       T       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228668        rs182926867     C       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228698        rs142280269     G       C       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/0:0.0:1.0:0.0:0.0:1.0:0.0
+22      20228764        rs34031696      G       A       .       .       .       GT:DS:Paa:Pab:Pbb:AP:BP 0/1:1.0:1.840345653647546e-10:0.9999999998159654:0.0:1.0:0.9999999998159654
+
+```

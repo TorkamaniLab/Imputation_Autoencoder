@@ -2616,7 +2616,10 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     train_x = train_x[randomize]
                     train_y = train_y[randomize]
                     
-                avg_r2 = 0                        
+                avg_r2 = 0
+                epoch_cost = 0
+                avg_a = 0
+                avg_rl = 0
                 for i in range(total_batch):
                     batch_x = train_x[i*batch_size:(i+1)*batch_size]
                     batch_y = train_y[i*batch_size:(i+1)*batch_size]
@@ -2647,6 +2650,9 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                             a, c, rl, myy = sess.run([accuracy, cost, reconstruction_loss, y_pred], feed_dict={X: batch_x, Y: batch_y} )
                     my_r2_tmp = pearson_r2(myy, batch_y)
                     avg_r2 += np.sum(my_r2_tmp['r2_per_sample'])/len(my_r2_tmp['r2_per_sample'])/total_batch
+                    avg_a += a/total_batch
+                    avg_rl += rl/total_batch
+                    epoch_cost+=c/total_batch
                     avg_cost+=c/total_batch/window
                 ############BATCH ENDS HERE                            
                 if(save_pred==True and ki==1): #if using cluster run for all k fold: if(save_pred==True):
@@ -2702,7 +2708,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                                                       
 ################Epoch end here
                 if(verbose>0):
-                    print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", c, " Accuracy:", a, " Reconstruction loss (" , loss_type, "): ", rl, "ce0:", myce0, "ce1:", myce1, "sr2:", avg_r2)
+                    print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", epoch_cost, " Accuracy:", a, " Reconstruction loss (" , loss_type, "): ", rl, "ce0:", myce0, "ce1:", myce1, "sr2:", avg_r2)
                     print("Shape pt0:", mypt0)
                     print("Shape pt1:", mypt1)
                     print("Shape g0:", g0)
@@ -2713,7 +2719,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     print("fl:", rl)
                     print("myy:", myy)
                 else:
-                    print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", c, " Accuracy:", a, " s_r2:", avg_r2, " Reconstruction loss (" , loss_type, "): ", rl)
+                    print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", epoch_cost, " Accuracy:", a, " s_r2:", avg_r2, " Reconstruction loss (" , loss_type, "): ", rl)
 
                 
                 if(save_model==True and (iepoch==training_epochs or epoch % window == 0) ):
