@@ -53,15 +53,48 @@ You are ready to run the imputation autoencoder. For more documentation on pipen
 
 ## How to run
 ```
-python3.6 imputation_autoencoder.py input_file parameter_file save_model initial_masking_rate final_masking_rate
+ Usage: python3 script.py INVCF HP REC IM FM CKPT_DIR
+
+     INVCF = [string] input file in vcf format
+     HP = [string] hyperparameter list file (space delimited list of hyperparameters)
+     REC = [True,False] Recovery mode, default is False
+     IM = [float or fraction] Initial masking rate
+     FM = [float or fraction] Final masking rate
+     CKPT_DIR = [string] (optional) only needed if recovery mode is True, path to the .ckpt file
+```
+Example 1 (new training): 
+```
+python3 imputation_autoencoder.py my_input.vcf my_param.txt False 0.1 0.99
 ```
 
-Where:
-- input_file: is a input file containing genetic variants in vcf format.
-- parameter_file: tab or space-delimited file containing one set of hyperparameters per line
-- save_model: [True, False] whether to save a backup of the trained model in the hard disk, the saved model file name will be inference_model*
-- initial_masking_rate: [float, fraction] initial masking rate, set 0 to disable masking
-- final_masking_rate: [float, fraction] final masking rate, set 0 to disable masking
+Example 2 (resume previous training):
+```
+python3 imputation_autoencoder.py my_input.vcf my_param.txt True 0.1 0.99 ./my_dir/my_model.ckpt
+```
+
+Where my_param.txt (hyperparameter file) should contain the following hyperparameters:
+```
+     L1: [float] L1 (Lasso) regularizer, small values recommended, should be less than 1, typically between 1e-2 and 1e-8
+     L2: [float] L2 (Ridge) regularizer, small values recommended, should be less than 1, typically between 1e-2 and 1e-8
+     beta: [float] Sparsity scaling factor beta, any value grater than 1
+     rho: [float] Desired average hidden layer activation (rho), less than 1
+     act: [string] Activation function type, values supported: ['sigmoid','tanh', 'relu']
+     LR: [float] Learning rate
+     gamma: [float] scaling factor for focal loss, ignored when loss_type!=FL
+     optimizer: [string] optimizer type, values supported: ['GradientDescent', 'Adam', 'RMSProp']
+     loss_type: [string] loss type, values supported: ['MSE', 'CE', 'WCE', 'FL'], which respectively mean: mean squared error, cross entropy, weighted cross entropy, and focal loss.
+     h_size: [float,string] hidden layer size, if 'sqrt' the hidden layer size will be equal to the square root of the input layer size, if float, the hidden layer size will be the hyperparameter value multiplied by input layer size
+     LB: [int] left buffer size, number of upstream input variants to be excluded from output layer
+     RB: [int] right buffer size, number of downstream input variants to be excluded from output layer
+     KP: [float vector] keep probability of each hidden layer, the number of hidden layers will be detected automatically from the number of values provided, each value must be comma separated (e.g: 1.0,0.8,0.3 for 3 hidden layers; 1.0,0.5 for 2 hidden layers, 0.5 for 1 hidden layer, etc.)
+```
+Each hyperparamter should be separated by space or tab, one hyper parameter set per line, for example (cat 3_hyper_par_set.txt):
+```
+     #L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size, LB, RB, KP
+     1e-06 1e-06 0.001 0.07 relu 10 5 RMSProp WCE sqrt 0 12 1
+     1e-05 1e-08 6 0.04 tanh 1e-05 2 GradientDescent FL 1 23 11 1,0.5
+     0.01 0.0001 0.01 0.004 tanh 0.0001 0 Adam FL 0.5 10 0 1,1,0.3
+```
 
 A more practical example:
 ```
@@ -70,40 +103,9 @@ python3.6 imputation_autoencoder.py input_example.vcf 3_hyper_par_set.txt False 
 The example above will run training using input_example.vcf, applying hyperparameter values from 3_hyper_par_set.txt, not saving the model into disk (False), starting with a small masking ratio (0.01), and will keep increasing masking until it reaches 0.98 masking ratio.
 You can redirect the reports from stdout to an output file like this:
 ```
-python3.6 imputation_autoencoder.py input_example.vcf 3_hyper_par_set.txt False 0.01 0.98 1> output.txt 2>output.log
+python3.6 imputation_autoencoder.py input_example.vcf 3_hyper_par_set.txt False 0.01 0.98 1> output.txt 2> output.log
 ```
 
-## Hyperparameters
-
-In addition to an input set of genotypes (input_example.tar.gz), the training algorithm (imputation_autoencoder.py) requires a set of hyper parameter values that are exemplified in the 3_hyper_par_set.txt file.
-The hyperparameters are provided as a tab delimited list, where each column is presented in the following order:
-
-- L1: [float] L1 (Lasso) regularizer, small values recommended, should be less than 1
-- L2: [float] L2 (Ridge) regularizer, small values recommended, should be less than 1
-- beta: [float] Sparsity scaling factor beta, any value grater than 1
-- rho: [float] Desired average hidden layer activation (rho), less than 1
-- act: [string] Activation function type, values supported: ['sigmoid','tanh', 'relu']
-- LR: [float] Learning rate
-- gamma: [float] scaling factor for focal loss, ignored when loss_type!=FL
-- optimizer: [string] optimizer type, values supported: ['GradientDescent', 'Adam', 'RMSProp']
-- loss_type: [string] loss type, values supported: ['MSE', 'CE', 'WCE', 'FL'], which respectively mean: mean squared error, cross entropy, weighted cross entropy, and focal loss.
-- h_size: [float,string] hidden layer size, if 'sqrt' the hidden layer size will be equal to the square root of the input layer size, if float, the hidden layer size will be the hyperparameter value multiplied by input layer size
-- LB: [int] left buffer size, number of upstream input variants to be excluded from output layer
-- RB: [int] right buffer size, number of downstream input variants to be excluded from output layer
-
-Example of one set of hyperparameters, following the listed order:
-```
-head -n 1 3_hyper_par_set.txt
-1e-06 1e-06 0.001 0.07 relu 10 5 RMSProp WCE 0.8 0 0
-```
-
-Multiple sets of hyperparameter values can be provided in the same file, one set per line, for example:
-```
-cat 3_hyper_par_set.txt
-1e-06 1e-06 0.001 0.07 relu 10 5 RMSProp WCE sqrt 0 12
-1e-05 1e-08 6 0.04 tanh 1e-05 2 GradientDescent FL 1 23 11
-0.01 0.0001 0.01 0.004 tanh 0.0001 0 Adam FL 0.5 10 0
-```
 
 In the example above the imputation autoencoder algorithm will train one model per hyperparameter set (3 models total).
 
