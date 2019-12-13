@@ -71,7 +71,7 @@ do_numpy_masking = True #array based method, much faster then nested for loops!
 par_mask_proc = 20 #how many masking parallel threads or processes, only used if par_mask_method is not "serial"
 par_mask_method = "threadpool" #["serial","threadpool","thread","joblib","ray"] "serial" to disable, parallel masking method, threadpool has been the fastest I found
 do_parallel_numpy_per_cycle = True #whole cycle in parallel
-do_parallel_gd_and_mask = True #TODO instead of parallelizing masking only, run masking and gradient descent in parallel
+do_parallel_gd_and_mask = False #instead of parallelizing masking only, run masking and gradient descent in parallel
 
 ############Performance options: future improvements
 use_cuDF = False #TODO enable data loading directly in the GPU
@@ -93,17 +93,17 @@ common_threshold2 = 1
 ############Learning options
 categorical = "False" #False: treat variables as numeric allele count vectors [0,2], True: treat variables as categorical values (0,1,2)(Ref, Het., Alt)
 split_size = 100 #number of batches
-training_epochs = 9 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 25000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
+training_epochs = 50000 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 25000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
 #761 permutations will start masking 1 marker at a time, and will finish masking 90% of markers
 last_batch_validation = False #when k==1, you may use the last batch for valitation if you want
 alt_signal_only = False #TODO Wether to treat variables as alternative allele signal only, like Minimac4, estimating the alt dosage
 all_sparse=True #set all hidden layers as sparse
-custom_beta=False #if True, beta scaling factor is proportional to number of features
+custom_beta=True #if True, beta scaling factor is proportional to number of features
 average_loss=False #True/False use everage loss, otherwise total sum will be calculated
 disable_alpha=True #disable alpha for debugging only
 early_stop_begin=500 #after what epoch to start monitoring the early stop criteria
 window=500 #stop criteria, threshold on how many epochs without improvement in average loss, if no improvent is observed, then interrupt training
-hysteresis=0.0001 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
+hysteresis=0.01 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
 
 ############Masking options
 fixed_masking = False #True: mask variants only at the beggining of the training cycle, False: mask again with a different pattern after each iteration (data augmentation mode)
@@ -113,6 +113,8 @@ mask_preset = False #True: mask from genotype array
 shuffle = True #Whether shuffle data or not at the begining of training cycle. Not necessary for online data augmentation.
 repeat_cycles = 4 #how many times to repeat the masking rate
 validate_after_epoch=False #after each epoch, apply a new masking pattern, then calculate validation accuracy on the new unseen mask pattern
+calculate_r2_per_epoch=False
+calculate_acc_per_epoch=False
 
 ############debugging options
 verbose=0
@@ -129,7 +131,7 @@ config = tf.ConfigProto(log_device_placement=False)
 config.intra_op_parallelism_threads = 0 #0=auto
 config.inter_op_parallelism_threads = 0 #0=auto
 config.gpu_options.allow_growth=True
-model_index=0
+model_index=30
 
 if(par_mask_method == "joblib"):
     import joblib
@@ -869,6 +871,9 @@ def calculate_gamma(y_pred, y_true):
     elif(gamma == 1):
         gamma_0 = pt_0
         gamma_1 = tf.subtract(eps, pt_1)
+    elif(gamma == 0.5):
+        gamma_0 = tf.sqrt(pt_0)
+        gamma_1 = tf.sqrt(tf.subtract(eps, pt_1))
     else:
         gamma_0 = tf.pow(pt_0, my_gamma)
         gamma_1 = tf.pow(tf.subtract(eps, pt_1), my_gamma)
@@ -1659,6 +1664,12 @@ def flatten_data(sess, myinput, factors=False):
         #print("Dimensions after flatting", x.shape)
     return x
 
+
+def flatten_data_np(x):
+    #x = np.copy(myinput)
+    x = np.reshape(x, (x.shape[0],-1))
+    return x
+
 def define_weights(ni,nh,no):
     w = {
         'encoder_h1': tf.Variable(tf.random_normal([ni, nh], dtype=tf.float64), name="w_encoder_h1"),
@@ -2120,6 +2131,11 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             mask_rate = initial_masking_rate
 
         time_epochs = 0
+        flat_time = 0
+        shuf_time = 0
+        rest_time = 0
+        save_time = 0
+
         epoch=0
         cycle_count = -1
         previous_window_avg_cost = 0
@@ -2137,8 +2153,23 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             if(verbose>1):
                 train_args = [optimizer, cost, accuracy, reconstruction_loss, mygamma_0, mygamma_1, ce0, ce1, pt0, pt1, wce, y_pred]
             else:
-                train_args = [optimizer, cost, accuracy, reconstruction_loss, y_pred]
+                if(calculate_r2_per_epoch==True):
+                    train_args = [optimizer, cost, accuracy, reconstruction_loss, y_pred]
+                else:
+                    train_args = [optimizer, cost, accuracy, reconstruction_loss]
+                    
+        if(calculate_r2_per_epoch==True):
+            if(save_summaries==True):
+                pred_args = [merged,accuracy, cost, y_pred, encoder_op, reconstruction_loss]
+            else:
+                pred_args = [accuracy, cost, reconstruction_loss, y_pred]
+        else:
+            if(save_summaries==True):
+                pred_args = [merged,accuracy, cost, encoder_op, reconstruction_loss]
+            else:
+                pred_args = [accuracy, cost, reconstruction_loss]
 
+        #EPOCH STARTS HERE
         for iepoch in range(training_epochs+1):
 
             if(recovery_mode=="True"):
@@ -2187,9 +2218,12 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             mask_stop = timeit.default_timer()
             mask_time += mask_stop-mask_start
 
+            flat_start = timeit.default_timer()
             #after masking, flatten data
-            train_x = flatten_data(sess, train_x, factors)
-            train_y = flatten_data(sess, train_y, factors)
+            #train_x = flatten_data(sess, train_x, factors)
+            #train_y = flatten_data(sess, train_y, factors)
+            train_x = flatten_data_np(train_x)
+            train_y = flatten_data_np(train_y)
             
             if(validate_after_epoch==True):
                 val_x = flatten_data(sess, val_x, factors)
@@ -2197,22 +2231,34 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             if(n_input!=n_output):
                 train_y = list(map(list, map(o_getter, np.copy(train_y))))
 
+            flat_stop = timeit.default_timer()
+            flat_time += flat_stop-flat_start
 
+            shuf_start = timeit.default_timer()
             if(shuffle==True):
-                randomize = np.arange(len(train_x))
-                np.random.shuffle(randomize)
-                train_x = np.asarray(train_x)
-                train_y = np.asarray(train_y)
+                #randomize = np.arange(len(train_x))
+                randomize = np.random.rand(len(train_x)).argsort()
+                #np.random.shuffle(randomize)
+                #train_x = np.asarray(train_x)
+                #train_y = np.asarray(train_y)
                 train_x = train_x[randomize]
                 train_y = train_y[randomize]
                 if(validate_after_epoch==True):
                     val_x = np.asarray(val_x)
                     val_x = val_x[randomize]
 
+            shuf_stop = timeit.default_timer()
+            shuf_time += shuf_stop-shuf_start
+                   
             avg_r2 = 0
             epoch_cost = 0
             avg_a = 0
             avg_rl = 0
+            
+            if(calculate_r2_per_epoch==False):
+                avg_r2="DISABLED"
+            if(calculate_acc_per_epoch==False):
+                avg_a="DISABLED"
 
             val_avg_a = 0
             val_avg_rl = 0
@@ -2242,11 +2288,16 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     data_masked_replicates = retrieve_cycle_results(m_result,pool)
                     mask_stop = timeit.default_timer()
                     mask_time += mask_stop-mask_start
-                                                        
+                
+                mask_start = timeit.default_timer()
+                
                 if(cycle_count>0 and do_parallel_numpy_per_cycle==False):
                     data_masked = data_masked_replicates[0]
                 else:
                     data_masked = data_masked_replicates[cycle_count]
+                    
+                mask_stop = timeit.default_timer()
+                mask_time += mask_stop-mask_start
                 
                 if(do_parallel_numpy_per_cycle==True and cycle_count>0):
                     gd_start = timeit.default_timer()
@@ -2259,13 +2310,17 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             
             for i in range(total_batch):
                 
+                rest_start = timeit.default_timer()
+                
                 if(do_parallel_gd_and_mask==False or iepoch==0):                
                     batch_x = train_x[i*batch_size:(i+1)*batch_size]
                     batch_y = train_y[i*batch_size:(i+1)*batch_size]                   
 
                 if(validate_after_epoch==True):
                     batch_val_x = val_x[i*batch_size:(i+1)*batch_size]
-
+                    
+                rest_stop = timeit.default_timer()
+                rest_time += rest_stop-rest_start
                 #calculate cost and optimizer functions                    
                 if(i!=(total_batch-1) or last_batch_validation==False):
                     gd_start = timeit.default_timer()
@@ -2292,24 +2347,46 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                         if(verbose>1):
                             _, c, a, rl, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = my_result
                         else:
-                            _, c, a, rl, myy = my_result
+                            if(calculate_r2_per_epoch==True):
+                                _, c, a, rl, myy = my_result
+                            else:
+                                _, c, a, rl = my_result
 
                     gd_stop = timeit.default_timer()
                     gd_time += gd_stop-gd_start
 
                 else:
-                    if(save_summaries==True):
-                        mysummary, a, c, myy, _, rl  = sess.run([merged,accuracy, cost, y_pred, encoder_op, reconstruction_loss], feed_dict={X: batch_x, Y: batch_y} )                
-                        valid_writer.add_summary(mysummary, epoch )
-                    else:
-                        a, c, rl, myy = sess.run([accuracy, cost, reconstruction_loss, y_pred], feed_dict={X: batch_x, Y: batch_y} )
+                    gd_start = timeit.default_timer()
 
-                my_r2_tmp = pearson_r2(myy, batch_y)
-                avg_r2 += np.sum(my_r2_tmp['r2_per_sample'])/len(my_r2_tmp['r2_per_sample'])/total_batch
-                avg_a += a/total_batch
+                    if(calculate_r2_per_epoch==True):     
+                        if(save_summaries==True):
+                            mysummary, a, c, myy, _, rl  = sess.run(pred_args, feed_dict={X: batch_x, Y: batch_y} )                
+                            valid_writer.add_summary(mysummary, epoch )
+                        else:
+                            a, c, rl, myy = sess.run(pred_args, feed_dict={X: batch_x, Y: batch_y} )
+                    else:
+                        if(save_summaries==True):
+                            mysummary, a, c, _, rl  = sess.run(pred_args, feed_dict={X: batch_x, Y: batch_y} )                
+                            valid_writer.add_summary(mysummary, epoch )
+                        else:
+                            a, c, rl = sess.run(pred_args, feed_dict={X: batch_x, Y: batch_y} )
+                            
+                    gd_stop = timeit.default_timer()
+                    gd_time += gd_stop-gd_start                        
+            
+                rest_start = timeit.default_timer()
+            
+                if(calculate_r2_per_epoch==True):
+                    my_r2_tmp = pearson_r2(myy, batch_y)
+                    avg_r2 += np.sum(my_r2_tmp['r2_per_sample'])/len(my_r2_tmp['r2_per_sample'])/total_batch
+
+                if(calculate_acc_per_epoch==True):
+                    avg_a += a/total_batch
+                    
                 avg_rl += rl/total_batch
-                epoch_cost+=c/total_batch
-                avg_cost+=c/total_batch/window
+                c_tmp=c/total_batch
+                epoch_cost+=c_tmp
+                avg_cost+=c_tmp/window
 
                 if(validate_after_epoch==True):
                     my_val_pred = vc, va, vrl, vmyy  = sess.run([cost, accuracy, reconstruction_loss, y_pred], feed_dict={X: batch_val_x, Y: batch_y} )    
@@ -2319,17 +2396,16 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     val_avg_rl += vrl/total_batch
                     val_epoch_cost+=vc/total_batch
                     val_avg_cost+=vc/total_batch/window
+                    
+                rest_stop = timeit.default_timer()
+                rest_time += rest_stop-rest_start                        
 
-            ############BATCH ENDS HERE                            
+            ############BATCH ENDS HERE   
+                    
+            rest_start = timeit.default_timer()
+                
             if(save_pred==True): #if using cluster run for all k fold: if(save_pred==True):
                 #This generates 1GB files per epoch per k-fold iteration, at least 5TB of space required, uncoment when using the HPC cluster with big storage
-                #my_pred = sess.run([y_pred], feed_dict={X: train_x, Y: train_y} )
-                #print(my_pred.shape) #3D array 1,features,samples
-                #fname = "k-" + str(ki) + "_epoch-" + str(epoch+1) + "_train-pred.out"
-                #with open(fname, 'w') as f:
-                #    np.savetxt(f, my_pred[0])
-                #f.close()
-
                 my_pred = sess.run([y_pred], feed_dict={X: val_x, Y: val_y} )
 
                 fname = "k-" + str(ki) + "_epoch-" + str(epoch+1) + "_val-pred.out"
@@ -2337,11 +2413,6 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     np.savetxt(f,  my_pred[0])
                 f.close()
 
-            #print("Calculating MIC") 
-            #mic_c, tic_c =  cstats(genotypes, activations, est="mic_e")
-            #M.assign(mic_e).eval() # assign_sub/assign_add is also available.
-            #mysummary, _ = sess.run([merged, M] )
-            #valid_writer.add_summary(mysummary, epoch )
             if(epoch==early_stop_begin):
                 #mask_increase
                 mask_increase = 0.2*(repeat_cycles+1)/window
@@ -2365,7 +2436,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 avg_cost=0
                 val_avg_cost=0
 
-
+                
 ################Epoch end here
             if(verbose>1):
                 print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", epoch_cost, " Accuracy:", avg_a, " Reconstruction loss (" , loss_type, "): ", avg_rl, "ce0:", myce0, "ce1:", myce1, "sr2:", avg_r2, flush=True)
@@ -2383,8 +2454,16 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             if(validate_after_epoch==True):
                 print("VALIDATION:Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", val_epoch_cost, " Accuracy:", val_avg_a, " s_r2:", val_avg_r2, " Reconstruction loss (" , loss_type, "): ", val_avg_rl, flush=True)
 
-
-            if(save_model==True and (iepoch==training_epochs or epoch % window == 0) ):
+            
+            rest_stop = timeit.default_timer()
+            rest_time += rest_stop-rest_start  
+                            
+            stop_epochs = timeit.default_timer()
+            time_epochs += stop_epochs-start_epochs
+            
+            save_start = timeit.default_timer()
+            
+            if(save_model==True and iepoch>0 and (iepoch==training_epochs or epoch % window == 0) ):
                 #Create a saver object which will save all the variables
                 saver = tf.train.Saver(max_to_keep=2)
 
@@ -2398,13 +2477,14 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 saver.save(sess, filename)
                 print("Saving model done")
 
-            stop_epochs = timeit.default_timer()
-            time_epochs += stop_epochs-start_epochs
+            save_stop = timeit.default_timer()
+            save_time += save_stop-save_start  
 
+        
             if(time_to_stop==True):
                 print("Stop criteria satisfied: epoch =", epoch, "previous_window_avg_cost =", previous_window_avg_cost, "current_window_avg_cost =", current_window_avg_cost)
                 break  
-
+    
         if(save_pred==True):
 
             fname = "k-" + str(ki) + "_train-obs.out"
@@ -2428,6 +2508,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             mysummary, my_cost, my_rloss, my_sloss, my_acc, my_cacc  = sess.run([merged, cost, reconstruction_loss, sparsity_loss, accuracy, cost_accuracy], feed_dict={X: train_x, Y: train_y})
 
             valid_writer.add_summary(mysummary, epoch )
+        
         if(full_train_report==False):
             my_cost = 0
             my_rloss = 0
@@ -2438,7 +2519,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             my_acc_t = [0,0,0,0]
             my_r2 = 0
             for i in range(total_batch):
-                print("Calculating F1 for batch", i)
+                print("Calculating F1 for batch", i, flush=True)
                 batch_x = train_x[i*batch_size:(i+1)*batch_size]
                 batch_y = train_y[i*batch_size:(i+1)*batch_size]
 
@@ -2541,14 +2622,24 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         print("Training complete.")
             
     stop = timeit.default_timer()
+    
     print('Time to run all training (sec): ', stop - start)
     print('Time to run all epochs (sec): ', time_epochs)
-    print('Time to run each epoch, average (sec): ', time_epochs/(training_epochs))
-    print('Time to run all accuracy metrics (sec): ', time_metrics)
     print('Time to run all gradient descent iteratons (GPU): ', gd_time)
-    print('Time to run all masking iteratons (CPU): ', mask_time)    
+    print('Time to run all masking iteratons (CPU): ', mask_time)
+    print('Time to run all flatten iterations (CPU): ', flat_time)
+    print('Time to run all shuffle iterations (CPU): ', shuf_time)
+    print('Time to run all model saving (GPU<->CPU<->IO), once per checkpoint window: ', save_time)
+    print('Time to define and start graph/session (CPU->GPU), ance by the start of training: ', prep_time)    
+    print('Time to run all accuracy metrics (sec), once by the end of training: ', time_metrics)
+#    print('Time to run all remaining tasks for all iterations (CPU): ', rest_time)
+
+    print('Time to run each epoch, average (sec): ', time_epochs/(training_epochs+1))
+    print('Time to run each gradient descent iteraton (GPU): ', gd_time/(training_epochs+1))
+    print('Time to run each masking iteraton (CPU): ', mask_time/(training_epochs+1)) 
+    print('Time to run each flatten iteration (CPU): ', flat_time/(training_epochs+1))
+    print('Time to run each shuffle iteration (CPU): ', shuf_time/(training_epochs+1))
     print('Time to run performance per MAF threshold calculations (CPU<->GPU):', r_report_time)
-    print('Time to define and start graph/session (CPU->GPU): ', prep_time)    
     
     if(save_summaries==True):
         train_writer.close()
