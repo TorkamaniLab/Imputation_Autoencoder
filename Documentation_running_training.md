@@ -50,7 +50,7 @@ done > to_run_list.sh
 ```
 
 ## Running in DGX
-```
+
 All the commands to run are saved at to_run_list.sh, then you can easily run them in parallel, let's say that we can run 2 models per GPU, and we have 4 gpus in DGX, then the command should look like:
 
 ```
