@@ -47,7 +47,7 @@ for i in $root_dir/*.vcf.VMV1; do
     fi
 
 done > to_run_list.sh
-
+```
 
 ## Running in DGX
 ```
