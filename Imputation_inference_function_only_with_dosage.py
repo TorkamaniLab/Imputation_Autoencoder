@@ -30,7 +30,7 @@ import os
 
 #posfile = "HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf.clean4.pos.1-5"
 #infile = "ARIC_PLINK_flagged_chromosomal_abnormalities_zeroed_out_bed.lifted_NCBI36_to_GRCh37.GH.ancestry-1.chr9_intersect1.vcf.gz.9p21.3.recode.vcf"
-DEBUG=True
+DEBUG=False
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1' 
 
 if(len(sys.argv)>=4):
@@ -41,19 +41,40 @@ if(len(sys.argv)>=4):
 
 else:
 
-   print("\nUsage: python3 Imputation_inference_function.py reference.1-5 genotype_array model_file output_file_name\n")
+   print("\nUsage: python3 Imputation_inference_function.py reference.1-5 genotype_array model_file output_file_name model_index\n")
    print("       reference.1-5:       first 5 columns of reference panel VCF file (chromosome position rsID REF ALT), used to build imputed file")
    print("       genotype_array:      genotype array file in VCF format, file to be imputed")
    print("       model_file:          pretrained model directory path (just directory path, no file name and no extension required")
    print("       output_file_name:    (optional) a name for the output file, imputed file in VCF format, same name prefix as input if no out name is provided")
+   print("       model_index:    (optional) if validating grid search results, provide model index, integer starting from 0")
 
    sys.exit()
 
 import tensorflow as tf
 
 
-meta_path = model_dir+"/inference_model-1.ckpt.meta"
-model_path = model_dir+"/inference_model-1.ckpt"
+meta_path = model_dir+"/inference_model-best.ckpt.meta"
+model_path = model_dir+"/inference_model-best.ckpt"
+
+
+
+#included multi-model support
+if(len(sys.argv)==6):
+    model_index=sys.argv[5]
+    meta_path = model_dir+"/inference_model-best_M"+model_index+".ckpt.meta"
+    model_path = model_dir+"/inference_model-best_M"+model_index+".ckpt"
+
+
+
+def convert_gt_to_int(gt,alt_signal_only=False):
+
+    genotype_to_int={'0/0': [1,0], '0|0': [1,0], '0/1': [1,1], '0|1':[1,1], '1/0':[1,1], '1|0':[1,1], '1/1':[0,1], '1|1':[0,1], './0':[0,0], './1':[0,0], './.':[0,0], '0/.':[0,0], '1/.':[0,0]}
+    result=genotype_to_int[gt[0:3]]
+
+    if(alt_signal_only==True):
+        genotype_to_int={'0/0': 0, '0|0': 0.0, '0/1': 1, '0|1':1, '1/0':1, '1|0':1, '1/1':2, '1|1':2, './0':-1, './1':-1, './.':-1, '0/.':-1, '1/.':-1}
+    
+    return result
 
 def process_data(posfile, infile):
 
@@ -115,27 +136,15 @@ def process_data(posfile, infile):
         while j < len(refpos): #"|" is present when phased data is proved, "/" is usually unphased
             if(refpos[j] in inpos.keys()):
                 myidx = inpos[refpos[j]]
-                #print(j)
-                #print(inpos[refpos[j]])
-                #print(refpos[j])
-                #print(df[i][myidx])
-                #print(df[i+1][myidx])
-                if(df[i][myidx].startswith('1|1') or df[i][myidx].startswith('1/1')):
-                    new_df[idx][j][0] = 0
-                    new_df[idx][j][1] = 1
-                elif(df[i][myidx].startswith('1|0') or df[i][myidx].startswith('0|1') or df[i][myidx].startswith('1/0') or df[i][myidx].startswith('0/1')):
-                    new_df[idx][j][0] = 1
-                    new_df[idx][j][1] = 1
-                elif(df[i][myidx].startswith('0|0') or df[i][myidx].startswith('0/0')):
-                    new_df[idx][j][0] = 1
-                    new_df[idx][j][1] = 0
-                else:
-                    new_df[idx][j][0] = 0 
-                    new_df[idx][j][1] = 0 
+                new_df[idx][j]=convert_gt_to_int(df[i][myidx][0:3])
+                if(DEBUG==True):
+                    print(df[i][myidx][0:3], "O->", new_df[idx][j])
             else:
-                new_df[idx][j][0] = 0 
-                new_df[idx][j][1] = 0 
+                new_df[idx][j]=convert_gt_to_int('./.')
+                if(DEBUG==True):
+                    print(df[i][myidx][0:3], "X->", new_df[idx][j])
             j += 1
+
         i += 1
         idx += 1
 
@@ -188,10 +197,10 @@ def export_vcf(posfile, pred_out, infile):
 
 
     with open(infile) as f:
-       for line in f:
-           if(line.startswith("#CHROM")):
-              my_header=line
-              break
+        for line in f:
+            if(line.startswith("#CHROM")):
+                my_header=line
+                break
 
     refpos = pd.read_csv(posfile, sep='\t', comment='#',header=None)
 
