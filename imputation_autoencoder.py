@@ -93,17 +93,18 @@ common_threshold2 = 1
 ############Learning options
 categorical = "False" #False: treat variables as numeric allele count vectors [0,2], True: treat variables as categorical values (0,1,2)(Ref, Het., Alt)
 split_size = 100 #number of batches
-training_epochs = 50000 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 25000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
+training_epochs = 9 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 25000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
 #761 permutations will start masking 1 marker at a time, and will finish masking 90% of markers
 last_batch_validation = False #when k==1, you may use the last batch for valitation if you want
 alt_signal_only = False #TODO Wether to treat variables as alternative allele signal only, like Minimac4, estimating the alt dosage
 all_sparse=True #set all hidden layers as sparse
-custom_beta=True #if True, beta scaling factor is proportional to number of features
+custom_beta=False #if True, beta scaling factor is proportional to number of features
 average_loss=False #True/False use everage loss, otherwise total sum will be calculated
 disable_alpha=True #disable alpha for debugging only
+inverse_alpha=False
 early_stop_begin=500 #after what epoch to start monitoring the early stop criteria
 window=500 #stop criteria, threshold on how many epochs without improvement in average loss, if no improvent is observed, then interrupt training
-hysteresis=0.01 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
+hysteresis=0.0001 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
 
 ############Masking options
 fixed_masking = False #True: mask variants only at the beggining of the training cycle, False: mask again with a different pattern after each iteration (data augmentation mode)
@@ -131,7 +132,7 @@ config = tf.ConfigProto(log_device_placement=False)
 config.intra_op_parallelism_threads = 0 #0=auto
 config.inter_op_parallelism_threads = 0 #0=auto
 config.gpu_options.allow_growth=True
-model_index=30
+model_index=0
 
 if(par_mask_method == "joblib"):
     import joblib
@@ -824,9 +825,13 @@ def calculate_alpha():
     alpha = tf.multiply(tf.cast(MAF_all_var_vector,tf.float64),2.0)
     alpha = tf.clip_by_value(alpha, 1e-4, eps)
 
-    alpha_1 = tf.divide(one, alpha)
-    alpha_0 = tf.divide(one, tf.subtract(one,alpha))
-    
+    if(inverse_alpha==True):
+        alpha_1 = tf.divide(one, alpha)
+        alpha_0 = tf.divide(one, tf.subtract(one,alpha))
+    else:
+        alpha_1 = alpha
+        alpha_0 = tf.subtract(one,alpha)
+        
     return alpha_0, alpha_1
 
 def weighted_cross_entropy(y_pred, y_true):
@@ -871,9 +876,6 @@ def calculate_gamma(y_pred, y_true):
     elif(gamma == 1):
         gamma_0 = pt_0
         gamma_1 = tf.subtract(eps, pt_1)
-    elif(gamma == 0.5):
-        gamma_0 = tf.sqrt(pt_0)
-        gamma_1 = tf.sqrt(tf.subtract(eps, pt_1))
     else:
         gamma_0 = tf.pow(pt_0, my_gamma)
         gamma_1 = tf.pow(tf.subtract(eps, pt_1), my_gamma)
@@ -1804,6 +1806,8 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
     encoder_result = encoder_op
 
+    y_pred = tf.identity(y_pred, name="y_pred")
+
     #print(encoder_op)
     # predict result
     #y_pred = decoder_op
@@ -2656,14 +2660,13 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
 def main():
     #split_size = 10 #k for 10-fold cross-validation
+    if(len(sys.argv)!=6 and len(sys.argv)!=7):
+        return False
     
     print("Name of the script: ", sys.argv[0])
     print("Number of arguments: ", len(sys.argv)-1)
     print("The arguments are: " , str(sys.argv))
 
-    if(len(sys.argv)!=6 and len(sys.argv)!=7):
-        return False
-    
     if(save_model==True):
         model_dir=os.path.basename(sys.argv[1])+"_model"
         if(os.path.exists(model_dir)==False):
