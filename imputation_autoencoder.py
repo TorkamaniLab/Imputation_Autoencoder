@@ -103,6 +103,7 @@ average_loss=False #True/False use everage loss, otherwise total sum will be cal
 disable_alpha=True #disable alpha for debugging only
 inverse_alpha=False
 early_stop_begin=1 #after what epoch to start monitoring the early stop criteria
+
 window=500 #stop criteria, threshold on how many epochs without improvement in average loss, if no improvent is observed, then interrupt training
 hysteresis=0.0001 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
 
@@ -1813,6 +1814,8 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     encoder_result = encoder_op
     y_pred = tf.identity(y_pred, name="y_pred")
 
+    y_pred = tf.identity(y_pred, name="y_pred")
+
     #print(encoder_op)
     # predict result
     #y_pred = decoder_op
@@ -2687,14 +2690,13 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
 def main():
     #split_size = 10 #k for 10-fold cross-validation
+    if(len(sys.argv)!=6 and len(sys.argv)!=7):
+        return False
     
     print("Name of the script: ", sys.argv[0])
     print("Number of arguments: ", len(sys.argv)-1)
     print("The arguments are: " , str(sys.argv))
 
-    if(len(sys.argv)!=6 and len(sys.argv)!=7):
-        return False
-    
     if(save_model==True):
         model_dir=os.path.basename(sys.argv[1])+"_model"
         if(os.path.exists(model_dir)==False):

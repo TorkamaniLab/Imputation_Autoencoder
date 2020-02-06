@@ -193,6 +193,63 @@ head hyper_parameter_list.10000.txt
 1e-05 0 10 0.01 tanh 0.0001 1 RMSProp FL 0.80 0 0
 ```
 
+## Running hyperparameter fine tunning
+
+After you completed coarse grid search (step above), you may want to pick the top 3 or 5 models ranked by r-squared, and generate a new population of models with parameter swap and mutations in the hyperparameter values.
+For mutating and swaping hyperparameter values, generating a new fine tunning grid search, you can use mutate_hp.py:
+
+```
+ python3 mutate_hp.py -h
+usage: mutate_hp.py [-h] [--mutation_rate MUTATION_RATE]
+                    [--swap_rate SWAP_RATE] [--pop_size POP_SIZE]
+                    [--keep_parents KEEP_PARENTS]
+                    infile outfile
+
+Import and mutate hyperparameters, generating a child population from parents,
+with mutated and swaped hyperparameters
+
+positional arguments:
+  infile                [str] Input hyperparameter file
+  outfile               [str] Output hyperparameter file with mutated
+                        hyperparameters
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --mutation_rate MUTATION_RATE
+                        [float] mutation rate, default = 0.5
+  --swap_rate SWAP_RATE
+                        [float] swap rate, default = 0.5
+  --pop_size POP_SIZE   [int] number of children to be generated, default = 12
+  --keep_parents KEEP_PARENTS
+                        [yes,no] Whether to keep parents in the child
+                        population, default = no
+```
+
+Example run, where hyper_parameter_list.top5.txt are a list of hyperparameters, as described in the previous section of this readme, and hyper_parameter_list.top5_mutated12.txt is the new mutated hyperparameter set:
+
+```
+python3 mutate_hp.py hyper_parameter_list.top5.txt hyper_parameter_list.top5_mutated12.txt
+```
+
+The result should contain a new population of hyperparameter values slightly different from the original one, ready for training:
+
+```
+cat hyper_parameter_list.top5_mutated12.txt
+0.0010099 0.03288162 0.1 0.01 tanh 0.0001 0 Adam FL 1 0 0 0.13,0.65
+0.05823567 0.01 5 0.00160888 tanh 0.00076641 2.64100751 Adam FL 1 0 0 0.73,0.34,0.91
+0.0001 0.0 3.124496 0.04 tanh 2.71e-06 0 Adam FL 1 0 0 0.61,0.9
+0.00224852 0 18.90665286 0.01 tanh 1.67e-06 4.90318384 Adam FL 1 0 0 0.98,0.28
+0.0001 1e-06 8.27511609 0.04 tanh 0.00013125 0 Adam FL 1 0 0 0.98,0.21
+5.687e-05 0.01 10.9538749 0.001 tanh 4.758e-05 6.17714527 Adam FL 1 0 0 1,0.7,0.25
+0.0 0 0.1 0.01879421 tanh 0.0001 0.12140119 Adam FL 1 0 0 0.7,0.25
+0.0001 0.03288162 0.1 0.01 tanh 0.0001 0 Adam FL 1 0 0 0.55,0.17
+0.0001 0.0 0.1 0.04 tanh 4.758e-05 0 Adam FL 1 0 0 0.69,0.34
+0.0 0 3.40001801 0.01 tanh 0.0001 0 Adam FL 1 0 0 0.7,0.25
+9.9e-07 1e-06 0.1 0.24088852 tanh 1e-05 0 Adam FL 1 0 0 1,0.25
+2e-08 0.01 12.25681177 0.01879421 tanh 0.0001 3.94145541 Adam FL 1 0 0 0.86,0.81,0.64
+```
+
+See running "How to run" section for detailed instructions on how to run a new training cycle on the new generated hyperparameter values.
 
 ## Running Inference
 
