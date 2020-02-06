@@ -53,11 +53,11 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-try:
-    from tensorflow.python.util import module_wrapper as deprecation
-except ImportError:
-    from tensorflow.python.util import deprecation_wrapper as deprecation
-deprecation._PER_MODULE_WARNING_LIMIT = 0
+#try:
+#    from tensorflow.python.util import module_wrapper as deprecation
+#except ImportError:
+#    from tensorflow.python.util import deprecation_wrapper as deprecation
+#deprecation._PER_MODULE_WARNING_LIMIT = 0
 
 
 ###################################DEV_OPTIONS#############################################
@@ -93,17 +93,18 @@ common_threshold2 = 1
 ############Learning options
 categorical = "False" #False: treat variables as numeric allele count vectors [0,2], True: treat variables as categorical values (0,1,2)(Ref, Het., Alt)
 split_size = 100 #number of batches
-training_epochs = 50000 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 25000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
+training_epochs = 35000 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 25000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
 #761 permutations will start masking 1 marker at a time, and will finish masking 90% of markers
 last_batch_validation = False #when k==1, you may use the last batch for valitation if you want
 alt_signal_only = False #TODO Wether to treat variables as alternative allele signal only, like Minimac4, estimating the alt dosage
 all_sparse=True #set all hidden layers as sparse
-custom_beta=True #if True, beta scaling factor is proportional to number of features
+custom_beta=False #if True, beta scaling factor is proportional to number of features
 average_loss=False #True/False use everage loss, otherwise total sum will be calculated
 disable_alpha=True #disable alpha for debugging only
-early_stop_begin=500 #after what epoch to start monitoring the early stop criteria
+inverse_alpha=False
+early_stop_begin=1 #after what epoch to start monitoring the early stop criteria
 window=500 #stop criteria, threshold on how many epochs without improvement in average loss, if no improvent is observed, then interrupt training
-hysteresis=0.01 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
+hysteresis=0.0001 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
 
 ############Masking options
 fixed_masking = False #True: mask variants only at the beggining of the training cycle, False: mask again with a different pattern after each iteration (data augmentation mode)
@@ -131,7 +132,7 @@ config = tf.ConfigProto(log_device_placement=False)
 config.intra_op_parallelism_threads = 0 #0=auto
 config.inter_op_parallelism_threads = 0 #0=auto
 config.gpu_options.allow_growth=True
-model_index=30
+model_index=0
 
 if(par_mask_method == "joblib"):
     import joblib
@@ -182,8 +183,9 @@ def process_lines(lines):
     return processed_result
 
 def convert_genotypes_to_int(indexes, file, categorical="False"):
-    print("process:", multiprocessing.current_process().name, "arguments:", indexes, ":", file)
-
+    if(verbose>0):
+        print("process:", multiprocessing.current_process().name, "arguments:", indexes, ":", file)
+    
     j=0
     #command = "cut -f"
     #for i in range(len(indexes)):
@@ -549,7 +551,8 @@ def read_MAF_file(file):
     maftable['MAF'] = maftable['MAF'].astype(float)
 
     result = maftable['MAF'].values.tolist()
-    print("#####REF MAF#####",result)
+    if(verbose>0):
+        print("#####REF MAF#####",result)
     return result
 
 def calculate_ref_MAF(refname):
@@ -778,13 +781,13 @@ def calculate_pt(y_pred, y_true):
     pt_1 = tf.where(tf.equal(y_true, 1), y_pred, tf.ones_like(y_pred))
 
     #ref:https://github.com/unsky/focal-loss/blob/master/focal_loss.py
-    pt_1 = tf.clip_by_value(pt_1, 1e-8, 1.0) #avoid log(0) that returns inf
+    pt_1 = tf.clip_by_value(pt_1, 1e-10, 1.0-1e-10) #avoid log(0) that returns inf
     #pt_1 = tf.add(pt_1, 1e-8) #avoid log(0) that returns inf
 
     #if value is zero in y_true, than take value from y_pred, otherwise, write zeros
     pt_0 = tf.where(tf.equal(y_true, 0), y_pred, tf.zeros_like(y_pred))
 
-    pt_0 = tf.clip_by_value(pt_0, 0, 1.0-1e-8)
+    pt_0 = tf.clip_by_value(pt_0, 1e-10, 1.0-1e-10)
         
     return pt_0, pt_1
 
@@ -792,11 +795,11 @@ def calculate_CE(y_pred, y_true):
 
     pt_0, pt_1 = calculate_pt(y_pred, y_true)
     one = tf.cast(1.0, tf.float64)
-    eps=tf.cast(1.0+1e-8, tf.float64)
+    #eps=tf.cast(1.0+1e-8, tf.float64)
     n1 =  tf.cast(-1.0, tf.float64)
 
     CE_1 = tf.multiply(n1,tf.log(pt_1))
-    CE_0 = tf.multiply(n1,tf.log(tf.subtract(eps,pt_0)))
+    CE_0 = tf.multiply(n1,tf.log(tf.subtract(one,pt_0)))
 
     return CE_0, CE_1
 
@@ -824,9 +827,13 @@ def calculate_alpha():
     alpha = tf.multiply(tf.cast(MAF_all_var_vector,tf.float64),2.0)
     alpha = tf.clip_by_value(alpha, 1e-4, eps)
 
-    alpha_1 = tf.divide(one, alpha)
-    alpha_0 = tf.divide(one, tf.subtract(one,alpha))
-    
+    if(inverse_alpha==True):
+        alpha_1 = tf.divide(one, alpha)
+        alpha_0 = tf.divide(one, tf.subtract(one,alpha))
+    else:
+        alpha_1 = alpha
+        alpha_0 = tf.subtract(one,alpha)
+        
     return alpha_0, alpha_1
 
 def weighted_cross_entropy(y_pred, y_true):
@@ -858,7 +865,7 @@ def weighted_cross_entropy(y_pred, y_true):
 def calculate_gamma(y_pred, y_true):
     
     one=tf.cast(1.0, tf.float64)
-    eps=tf.cast(1.0+1e-8, tf.float64)
+    #eps=tf.cast(1.0+1e-10, tf.float64)
 
     my_gamma=tf.cast(gamma, tf.float64)
 
@@ -870,13 +877,13 @@ def calculate_gamma(y_pred, y_true):
         gamma_1 = one
     elif(gamma == 1):
         gamma_0 = pt_0
-        gamma_1 = tf.subtract(eps, pt_1)
+        gamma_1 = tf.subtract(one, pt_1)
     elif(gamma == 0.5):
         gamma_0 = tf.sqrt(pt_0)
-        gamma_1 = tf.sqrt(tf.subtract(eps, pt_1))
+        gamma_1 = tf.sqrt(tf.subtract(one, pt_1))
     else:
         gamma_0 = tf.pow(pt_0, my_gamma)
-        gamma_1 = tf.pow(tf.subtract(eps, pt_1), my_gamma)
+        gamma_1 = tf.pow(tf.subtract(one, pt_1), my_gamma)
     
     return gamma_0, gamma_1
 
@@ -1108,7 +1115,8 @@ def encoder(x, func, l1_val, l2_val, weights, biases, units_num, keep_rate): #RR
         layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['encoder_h1']), biases['encoder_b1']))
         layer_1 = tf.layers.dense(layer_1, units=units_num, kernel_regularizer= regularizer)
         #layer_1 = tf.layers.dense(layer_1, units=221, kernel_regularizer= regularizer)
-    elif func == 'relu':
+    
+    elif(func == 'relu' or func == 'relu,sigmoid' or func == 'relu,tanh' or func == 'relu_sigmoid' or func == 'relu_tanh'):
         print('Encoder Activation function: relu')
         #with tf.device("/gpu:1"):
         layer_1 = tf.nn.relu(tf.add(tf.matmul(x, weights['encoder_h1']),biases['encoder_b1']))
@@ -1126,7 +1134,7 @@ def decoder(x, func, weights, biases):
     else:
         entropy_loss = False
         
-    if func == 'sigmoid':
+    if(func == 'sigmoid' or func == 'relu,sigmoid' or func == 'relu_sigmoid'):
         print('Decoder Activation function: sigmoid')
         layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1']))
         #rescaling, if dealing with categorical variables or factors, tf.reduce_max(x) will result in 1
@@ -1135,7 +1143,7 @@ def decoder(x, func, weights, biases):
         #layer_1 = tf.round(layer_1)
         #layer_1 = tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1'])
 
-    elif func == 'tanh':
+    elif(func == 'tanh' or func == 'relu,tanh' or func == 'relu_tanh'):
         print('Decoder Activation function: tanh')
         layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1']))
         #rescaling, if dealing with categorical variables or factors, tf.reduce_max(x) will result in 1
@@ -1803,6 +1811,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         y_pred = decoder(encoder_op_h3, act_val, weights, biases)
 
     encoder_result = encoder_op
+    y_pred = tf.identity(y_pred, name="y_pred")
 
     #print(encoder_op)
     # predict result
@@ -1815,16 +1824,22 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     rho_hat = tf.reduce_mean(encoder_op,0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
     if (act_val == "tanh"):
         rho_hat = tf.div(tf.add(rho_hat,1.0),2.0) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
-    if (act_val == "relu"):
+    if (act_val == "relu" or act_val == "relu_tanh" or act_val == "relu,tanh"):
         rho_hat = tf.div(tf.add(rho_hat,1e-10),tf.reduce_max(rho_hat)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
 
     if(NH>=2 and all_sparse==True):
         rho_hat2 = tf.reduce_mean(encoder_op_h2,0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
         if (act_val == "tanh"):
             rho_hat2 = tf.div(tf.add(rho_hat2,1.0),2.0) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
-        if (act_val == "relu"):
+        if (act_val == "relu" or act_val == "relu_tanh" or act_val == "relu,tanh"):
             rho_hat2 = tf.div(tf.add(rho_hat2,1e-10),tf.reduce_max(rho_hat2)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
-
+    if(NH==3 and all_sparse==True):
+        rho_hat3 = tf.reduce_mean(encoder_op_h3,0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
+        if (act_val == "tanh"):
+            rho_hat3 = tf.div(tf.add(rho_hat3,1.0),2.0) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
+        if (act_val == "relu" or act_val == "relu_tanh" or act_val == "relu,tanh"):
+            rho_hat3 = tf.div(tf.add(rho_hat3,1e-10),tf.reduce_max(rho_hat3)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
+    
     #rho = tf.constant(rho) #not necessary maybe?
 
     with tf.name_scope('sparsity'):
@@ -1837,10 +1852,15 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             #sparsity_loss2 = tf.clip_by_value(sparsity_loss2, 1e-10, 1.0) #RR KL divergence, clip to avoid Inf or div by zero
             sparsity_loss = tf.add(sparsity_loss, sparsity_loss2)
 
+        if(NH==3 and all_sparse==True):
+            sparsity_loss3 = tf.cast(tf.reduce_mean(KL_Div(rho, rho_hat3)), tf.float64)
+            sparsity_loss = tf.add(sparsity_loss, sparsity_loss3)
+            
         sparsity_loss = tf.cast(sparsity_loss, tf.float64, name="sparsity_loss") #RR KL divergence, clip to avoid Inf or div by zero
 
     tf.summary.scalar('sparsity_loss', sparsity_loss)
 
+    print("sparsity_loss tensor", sparsity_loss)
     # define cost function, optimizers
     # loss function: MSE # example cost = tf.reduce_mean(tf.square(tf.subtract(output, x)))
     with tf.name_scope('loss'):
@@ -1874,6 +1894,9 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         
     tf.summary.scalar('reconstruction_loss_MSE', reconstruction_loss)
     tf.summary.scalar("final_cost", cost)
+
+    print("cost tensor", cost)
+
 
     #TODO: add a second scaling factor for MAF loss, beta2*MAF_loss
     #or add MAF as another feature instead of adding it to the loss function
@@ -2036,7 +2059,15 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             reconstruction_loss = graph.get_tensor_by_name("loss/reconstruction_loss:0")
             #reconstruction_loss = "reconstruction_loss:0"
             #sparsity_loss = "sparsity_loss:0"            
-            sparsity_loss = graph.get_tensor_by_name("sparsity/sparsity_loss:0")
+            if("sparsity/sparsity_loss" in a):
+                sparsity_loss = graph.get_tensor_by_name("sparsity/sparsity_loss:0")
+                print("Restored", "sparsity/sparsity_loss")
+            elif("sparsity/Add_4" in a):
+                sparsity_loss = graph.get_tensor_by_name("sparsity/Add_4:0")
+                print("Restored", "sparsity_loss")
+            else:
+                 print("ERROR OPTIMIZER NOT FOUND IN GRAPH. Nodes available: ", a)
+
             accuracy = graph.get_tensor_by_name("accuracy:0")
 
             #accuracy = "accuracy:0"
@@ -2462,8 +2493,8 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             time_epochs += stop_epochs-start_epochs
             
             save_start = timeit.default_timer()
-            
-            if(save_model==True and iepoch>0 and (iepoch==training_epochs or epoch % window == 0) ):
+
+            if(save_model==True and (time_to_stop==True or iepoch==training_epochs or (epoch+1) % window == 0) ):
                 #Create a saver object which will save all the variables
                 saver = tf.train.Saver(max_to_keep=2)
 
