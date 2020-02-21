@@ -2057,7 +2057,16 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             reconstruction_loss = graph.get_tensor_by_name("loss/reconstruction_loss:0")
             #reconstruction_loss = "reconstruction_loss:0"
             #sparsity_loss = "sparsity_loss:0"            
-            sparsity_loss = graph.get_tensor_by_name("sparsity/sparsity_loss:0")
+
+            if("sparsity/sparsity_loss" in a):
+                sparsity_loss = graph.get_tensor_by_name("sparsity/sparsity_loss:0")
+                print("Restored", "sparsity/sparsity_loss")
+            elif("sparsity/Add_4" in a):
+                sparsity_loss = graph.get_tensor_by_name("sparsity/Add_4:0")
+                print("Restored", "sparsity_loss")
+            else:
+                 print("ERROR OPTIMIZER NOT FOUND IN GRAPH. Nodes available: ", a)
+
             accuracy = graph.get_tensor_by_name("accuracy:0")
 
             #accuracy = "accuracy:0"
@@ -2483,8 +2492,8 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             time_epochs += stop_epochs-start_epochs
             
             save_start = timeit.default_timer()
-            
-            if(save_model==True and iepoch>0 and (iepoch==training_epochs or epoch+1 % window == 0) ):
+
+            if(save_model==True and (time_to_stop==True or iepoch==training_epochs or (epoch+1) % window == 0) ):
                 #Create a saver object which will save all the variables
                 saver = tf.train.Saver(max_to_keep=2)
 
