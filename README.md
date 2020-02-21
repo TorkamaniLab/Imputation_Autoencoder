@@ -5,6 +5,7 @@ Deep learning based imputation of genetic variants, this algorithm can be used e
 
 - Python 3.6
 - Tensorflow 1.13 (tested on 1.08 as well)
+- Plink 1.9 (if enabling plink-based allele frequency calculations)
 
 ## Configuration using pipenv
 
