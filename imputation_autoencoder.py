@@ -558,7 +558,7 @@ def read_MAF_file(file):
 def calculate_ref_MAF(refname):
     #plink --vcf HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf.clean4 --freq 
     outname=os.path.basename(refname)
-    result = sp.check_output("/gpfs/home/raqueld/bin/plink --vcf "+refname+" --freq --out "+outname, encoding='UTF-8', shell=True)
+    result = sp.check_output("plink --vcf "+refname+" --freq --out "+outname, encoding='UTF-8', shell=True)
 
     MAF_all_var = read_MAF_file(outname+".frq")
 
