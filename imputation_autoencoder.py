@@ -93,7 +93,7 @@ common_threshold2 = 1
 ############Learning options
 categorical = "False" #False: treat variables as numeric allele count vectors [0,2], True: treat variables as categorical values (0,1,2)(Ref, Het., Alt)
 split_size = 100 #number of batches
-training_epochs = 35000 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 25000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
+training_epochs = 499 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 25000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
 #761 permutations will start masking 1 marker at a time, and will finish masking 90% of markers
 last_batch_validation = False #when k==1, you may use the last batch for valitation if you want
 alt_signal_only = False #TODO Wether to treat variables as alternative allele signal only, like Minimac4, estimating the alt dosage
@@ -103,7 +103,6 @@ average_loss=False #True/False use everage loss, otherwise total sum will be cal
 disable_alpha=True #disable alpha for debugging only
 inverse_alpha=False
 early_stop_begin=1 #after what epoch to start monitoring the early stop criteria
-
 window=500 #stop criteria, threshold on how many epochs without improvement in average loss, if no improvent is observed, then interrupt training
 hysteresis=0.0001 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
 
@@ -1679,18 +1678,21 @@ def flatten_data_np(x):
     x = np.reshape(x, (x.shape[0],-1))
     return x
 
-def define_weights(ni,nh,no):
+def define_weights(ni,nh,no,last_layer=False):
     w = {
         'encoder_h1': tf.Variable(tf.random_normal([ni, nh], dtype=tf.float64), name="w_encoder_h1"),
-        'decoder_h1': tf.Variable(tf.random_normal([nh, no], dtype=tf.float64), name="w_decoder_h1"),
     }
+    if(last_layer==True):
+        w['decoder_h1']=tf.Variable(tf.random_normal([nh, no], dtype=tf.float64), name="w_decoder_h1")
     return w
 
-def define_biases(nh,no):
+def define_biases(nh,no,last_layer=False):
+    
     b = {
         'encoder_b1': tf.Variable(tf.random_normal([nh], dtype=tf.float64), name="b_encoder_b1"),
-        'decoder_b1': tf.Variable(tf.random_normal([no], dtype=tf.float64), name="b_decoder_b1"),
     }
+    if(last_layer==True):
+        b['decoder_b1']=tf.Variable(tf.random_normal([no], dtype=tf.float64), name="b_decoder_b1")
     return b
 #Code modified from example
 #https://stackoverflow.com/questions/44367010/python-tensor-flow-relu-not-learning-in-autoencoder-task
@@ -1753,19 +1755,27 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         o_indexes = list(range(n_left_buffer, n_left_buffer+n_output))    
         o_getter = operator.itemgetter(o_indexes)
 
-    #all hidden layer calculations now are based on the output layer size as reference, not input
+    #all hidden layer calculations now are based on the output layer size as reference, not input    
     if(hsize=="sqrt"):
-        n_hidden_1=int(round(np.sqrt(n_output))) #if hsize equal 'sqrt' hidden layer size equal to square root of number of input nodes
+        n_hidden=[int(round(np.sqrt(n_output)))] #if hsize equal 'sqrt' hidden layer size equal to square root of number of input nodes
     else:
         hsize=convert_to_float(hsize)
-        n_hidden_1 = int(round(n_output*hsize))  # hidden layer for encoder, equal to input number of features multiplied by a hidden size ratio
-
+        if(type(hsize) != type([])):
+            hsize = [hsize]
+        #n_hidden_1 = int(round(n_output*hsize))  # hidden layer for encoder, equal to input number of features multiplied by a hidden size ratio
+        n_hidden = [int(round(n_output*i)) for i in hsize]
+    
+    #if there are less hidden layer size values than number of hidden layer, replicate the first hidden layer size into the additional layers
+    while(len(n_hidden)<NH):
+        n_hidden.append(n_hidden[0])
+    
 
     print("Input data shape after coding variables:")
     print(n_input)
     
     print("Network size per layer:")
-    print(n_input, n_hidden_1, n_output)
+    #print(n_input, n_hidden_1, n_output)
+    print(n_input, n_hidden, n_output)
     
     # Input placeholders
     #with tf.name_scope('input'):
@@ -1777,43 +1787,32 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             
     #As parameters of a statistical model, weights and biases are learned or estimated by minimizing a loss function that depends on our data. 
     #We will initialize them here, their values will be set during the learning process
-    with tf.name_scope('weights'):
-        weights = define_weights(n_input,n_hidden_1,n_output)
-        variable_summaries(weights['encoder_h1'])
 
-    with tf.name_scope('biases'):
-        biases = define_biases(n_hidden_1,n_output)
-        variable_summaries(biases['encoder_b1'])
-        #weights['encoder_h1']), biases['encoder_b1'])
-    if(NH>1):
-        weights_h2 = define_weights(n_hidden_1,n_hidden_1,n_hidden_1)
-        biases_h2 = define_biases(n_hidden_1,n_hidden_1)
- 
-    if(NH==3):
-        weights_h3 = define_weights(n_hidden_1,n_hidden_1,n_hidden_1)
-        biases_h3 = define_biases(n_hidden_1,n_hidden_1)
+    n_hidden = [n_input] + n_hidden
+    weights_per_layer = []
+    biases_per_layer = []    
+    last_layer=False
+    for i in range(NH):
+        if(i==(NH-1)):
+            last_layer=True
+        with tf.name_scope('biases'):
+            biases_per_layer.append(define_biases(n_hidden[i+1], n_output,last_layer))
+            variable_summaries(biases_per_layer[i]['encoder_b1'])                   
+        with tf.name_scope('weights'):
+            weights_per_layer.append(define_weights(n_hidden[i],n_hidden[i+1],n_output,last_layer))
+            variable_summaries(weights_per_layer[i]['encoder_h1'])            
 
-    with tf.name_scope('Wx_plus_b'):
-        encoder_op = encoder(X, act_val, l1_val, l2_val, weights, biases, n_hidden_1, keep_rate[0])
+    encoder_operators = [X]
+    for i in range(NH):
+        with tf.name_scope('Wx_plus_b'):
+            encoder_operators.append(encoder(encoder_operators[i], act_val, l1_val, l2_val, weights_per_layer[i], biases_per_layer[i], n_hidden[i+1], keep_rate[i]))
+            tf.summary.histogram('activations', encoder_operators[i+1])
 
-    print(encoder_op)
-
-    tf.summary.histogram('activations', encoder_op)
-
-    if(NH==1):
-        y_pred = decoder(encoder_op, act_val, weights, biases)
-    if(NH>=2):
-        encoder_op_h2 = encoder(encoder_op, act_val, l1_val, l2_val, weights_h2, biases_h2, n_hidden_1, keep_rate[1])
-    if(NH==2):
-        y_pred = decoder(encoder_op_h2, act_val, weights, biases)
-    if(NH==3):
-        encoder_op_h3 = encoder(encoder_op_h2, act_val, l1_val, l2_val, weights_h3, biases_h3, n_hidden_1, keep_rate[2])
-        #decoder_op = decoder(encoder_op_h2, act_val, weights_h2, biases_h2)
-        y_pred = decoder(encoder_op_h3, act_val, weights, biases)
-
-    encoder_result = encoder_op
-    y_pred = tf.identity(y_pred, name="y_pred")
-
+    y_pred = decoder(encoder_operators[-1], act_val, weights_per_layer[NH-1], biases_per_layer[NH-1])            
+    print(encoder_operators[-1])
+    tf.summary.histogram('activations', encoder_operators[1])
+               
+    #encoder_result = encoder_op
     y_pred = tf.identity(y_pred, name="y_pred")
 
     #print(encoder_op)
@@ -1824,20 +1823,20 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     #TODO experimental Maximal information criteria calculation needs to be implemented
     #M = tf.zeros([n_input, n_input], name="MIC")
    
-    rho_hat = tf.reduce_mean(encoder_op,0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
+    rho_hat = tf.reduce_mean(encoder_operators[1],0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
     if (act_val == "tanh"):
         rho_hat = tf.div(tf.add(rho_hat,1.0),2.0) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
     if (act_val == "relu" or act_val == "relu_tanh" or act_val == "relu,tanh"):
         rho_hat = tf.div(tf.add(rho_hat,1e-10),tf.reduce_max(rho_hat)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
 
     if(NH>=2 and all_sparse==True):
-        rho_hat2 = tf.reduce_mean(encoder_op_h2,0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
+        rho_hat2 = tf.reduce_mean(encoder_operators[2],0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
         if (act_val == "tanh"):
             rho_hat2 = tf.div(tf.add(rho_hat2,1.0),2.0) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
         if (act_val == "relu" or act_val == "relu_tanh" or act_val == "relu,tanh"):
             rho_hat2 = tf.div(tf.add(rho_hat2,1e-10),tf.reduce_max(rho_hat2)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
     if(NH==3 and all_sparse==True):
-        rho_hat3 = tf.reduce_mean(encoder_op_h3,0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
+        rho_hat3 = tf.reduce_mean(encoder_operators[2],0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
         if (act_val == "tanh"):
             rho_hat3 = tf.div(tf.add(rho_hat3,1.0),2.0) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
         if (act_val == "relu" or act_val == "relu_tanh" or act_val == "relu,tanh"):
@@ -1863,7 +1862,6 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
     tf.summary.scalar('sparsity_loss', sparsity_loss)
 
-    print("sparsity_loss tensor", sparsity_loss)
     # define cost function, optimizers
     # loss function: MSE # example cost = tf.reduce_mean(tf.square(tf.subtract(output, x)))
     with tf.name_scope('loss'):
@@ -1897,9 +1895,6 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         
     tf.summary.scalar('reconstruction_loss_MSE', reconstruction_loss)
     tf.summary.scalar("final_cost", cost)
-
-    print("cost tensor", cost)
-
 
     #TODO: add a second scaling factor for MAF loss, beta2*MAF_loss
     #or add MAF as another feature instead of adding it to the loss function
@@ -2062,6 +2057,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             reconstruction_loss = graph.get_tensor_by_name("loss/reconstruction_loss:0")
             #reconstruction_loss = "reconstruction_loss:0"
             #sparsity_loss = "sparsity_loss:0"            
+
             if("sparsity/sparsity_loss" in a):
                 sparsity_loss = graph.get_tensor_by_name("sparsity/sparsity_loss:0")
                 print("Restored", "sparsity/sparsity_loss")
@@ -2690,13 +2686,14 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
 def main():
     #split_size = 10 #k for 10-fold cross-validation
-    if(len(sys.argv)!=6 and len(sys.argv)!=7):
-        return False
     
     print("Name of the script: ", sys.argv[0])
     print("Number of arguments: ", len(sys.argv)-1)
     print("The arguments are: " , str(sys.argv))
 
+    if(len(sys.argv)!=6 and len(sys.argv)!=7):
+        return False
+    
     if(save_model==True):
         model_dir=os.path.basename(sys.argv[1])+"_model"
         if(os.path.exists(model_dir)==False):
