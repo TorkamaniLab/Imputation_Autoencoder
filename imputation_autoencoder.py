@@ -834,6 +834,7 @@ def calculate_alpha(y_true):
         freq0 = tf.reduce_mean(tf.subtract(1.0, y_true),0) #frequency of zeros along columns (axis 0, per variable)
         freq01 = tf.stack([freq0, freq1], 0) #stack M frequencies generated, resulting into a 2xM tensor
         alpha = tf.reduce_min(freq01, 0) #return smallest value per colum
+        alpha = tf.cast(alpha, tf.float64)
         return alpha, alpha
 
     if(inverse_alpha==True):
