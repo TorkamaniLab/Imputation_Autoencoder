@@ -93,15 +93,16 @@ common_threshold2 = 1
 ############Learning options
 categorical = "False" #False: treat variables as numeric allele count vectors [0,2], True: treat variables as categorical values (0,1,2)(Ref, Het., Alt)
 split_size = 100 #number of batches
-training_epochs = 499 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 25000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
-#761 permutations will start masking 1 marker at a time, and will finish masking 90% of markers
+training_epochs = 35000 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 35000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
+#minimum training_epochs recommended for grid search training_epochs=499 (starts at 0)
 last_batch_validation = False #when k==1, you may use the last batch for valitation if you want
 alt_signal_only = False #TODO Wether to treat variables as alternative allele signal only, like Minimac4, estimating the alt dosage
 all_sparse=True #set all hidden layers as sparse
 custom_beta=False #if True, beta scaling factor is proportional to number of features
 average_loss=False #True/False use everage loss, otherwise total sum will be calculated
-disable_alpha=True #disable alpha for debugging only
-inverse_alpha=False
+disable_alpha=False #disable alpha for debugging only
+inverse_alpha=False #experimental feature, do not enable it for now
+freq_based_alpha=True #alpha is calculated based on the frequency of the least frequent class
 early_stop_begin=1 #after what epoch to start monitoring the early stop criteria
 window=500 #stop criteria, threshold on how many epochs without improvement in average loss, if no improvent is observed, then interrupt training
 hysteresis=0.0001 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
@@ -819,13 +820,21 @@ def cross_entropy(y_pred, y_true):
 
     return CE
 
-def calculate_alpha():
+def calculate_alpha(y_true):
 
     one=tf.cast(1.0, tf.float64)
     eps=tf.cast(1.0-1e-4, tf.float64)
 
     alpha = tf.multiply(tf.cast(MAF_all_var_vector,tf.float64),2.0)
     alpha = tf.clip_by_value(alpha, 1e-4, eps)
+
+    #return the frequency of the least frequent class per variable
+    if(freq_based_alpha==True):
+        freq1 = tf.reduce_mean(y_true, 0) #frequency of ones along columns (axis 0, per variable)
+        freq0 = tf.reduce_mean(tf.subtract(1, y_true),0) #frequency of zeros along columns (axis 0, per variable)
+        freq01 = tf.stack([freq0, freq1], 0) #stack M frequencies generated, resulting into a 2xM tensor
+        alpha = tf.reduce_min(freq01, 0) #return smallest value per colum
+        return alpha, alpha
 
     if(inverse_alpha==True):
         alpha_1 = tf.divide(one, alpha)
@@ -846,7 +855,7 @@ def weighted_cross_entropy(y_pred, y_true):
 
     CE_0, CE_1 =  calculate_CE(y_pred, y_true)
 
-    alpha_0, alpha_1 = calculate_alpha()
+    alpha_0, alpha_1 = calculate_alpha(y_true)
 
     WCE_per_var_1 = tf.multiply(CE_1, alpha_1)
     WCE_per_var_0 = tf.multiply(CE_0, alpha_0)
@@ -894,7 +903,7 @@ def focal_loss(y_pred, y_true):
     
     CE_0, CE_1 =  calculate_CE(y_pred, y_true)
 
-    alpha_0, alpha_1 = calculate_alpha()
+    alpha_0, alpha_1 = calculate_alpha(y_true)
 
     FL_per_var_1_a = CE_1[:,1::2]
     FL_per_var_0_a = CE_0[:,1::2]
@@ -934,31 +943,6 @@ def focal_loss(y_pred, y_true):
         FL = tf.add(FL_1, FL_0, name='reconstruction_loss')
 
     return FL
-
-def fl01(y_pred, y_true):
-    
-    #avoid making useless calculations if gamma==0
-    #if(gamma==0):
-    #    WCE = weighted_cross_entropy(y_pred, y_true)
-    #    return WCE
-
-    one=tf.cast(1.0, tf.float64)
-    #eps=tf.cast(1.0+1e-8, tf.float64)
-    
-    CE_0, CE_1 =  calculate_CE(y_pred, y_true)
-
-    alpha_0, alpha_1 = calculate_alpha()
-
-    FL_per_var_1 = tf.multiply(CE_1, alpha_1)
-    FL_per_var_0 = tf.multiply(CE_0, alpha_0)
-     
-    FL_per_var_1 = tf.multiply(FL_per_var_1, gamma_1)
-    FL_per_var_0 = tf.multiply(FL_per_var_0, gamma_0)
-
-    FL_1 = tf.reduce_sum(FL_per_var_1)
-    FL_0 = tf.reduce_sum(FL_per_var_0)
-
-    return FL_0, FL_1
 
 def f1_score(y_pred, y_true, sess):
     
