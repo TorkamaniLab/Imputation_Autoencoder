@@ -106,6 +106,7 @@ average_loss=False #True/False use everage loss, otherwise total sum will be cal
 disable_alpha=False #disable alpha for debugging only
 inverse_alpha=False #experimental feature, do not enable it for now
 freq_based_alpha=True #alpha is calculated based on the frequency of the least frequent class
+per_batch_alpha=False #alpha is calculated based on the frequency of the least frequent class per batch
 early_stop_begin=1 #after what epoch to start monitoring the early stop criteria
 window=500 #stop criteria, threshold on how many epochs without improvement in average loss, if no improvent is observed, then interrupt training
 hysteresis=0.0001 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
@@ -128,6 +129,7 @@ verbose=0
  
 #global variables
 MAF_all_var = [] #MAF calculated only once for all variants,remove redundancies
+freq_all_var = []
 rare_indexes = [] #indexes of rare variants
 common_indexes = [] #indexes of common variants
 MAF_all_var_vector = [] #vector of weights equal to number of output nodes (featuresX2 by default)
@@ -439,6 +441,16 @@ def process_data(file, categorical="False"):
     print('Time to load the data (sec): ', stop - start)
     
     start_time = timeit.default_timer()
+
+    if(freq_based_alpha == True):
+        global freq_all_var
+        y_true = np.copy(results)
+        y_true = flatten_data_np(y_true)
+        freq1 = np.mean(y_true, 0) #frequency of ones along columns (axis 0, per variable)
+        freq0 = np.mean(np.subtract(1.0, y_true),0) #frequency of zeros along columns (axis 0, per variable)
+        freq01 = np.stack([freq0, freq1], 0) #stack M frequencies generated, resulting into a 2xM array
+        freq_all_var = np.amin(freq01, 0) #return smallest value per colum
+        freq_all_var = np.add(1.0,freq_all_var)
 
     global MAF_all_var
     
@@ -829,11 +841,16 @@ def calculate_alpha(y_true):
     alpha = tf.clip_by_value(alpha, 1e-4, eps)
 
     #return the frequency of the least frequent class per variable
-    if(freq_based_alpha==True):
+    if(per_batch_alpha==True):
         freq1 = tf.reduce_mean(y_true, 0) #frequency of ones along columns (axis 0, per variable)
         freq0 = tf.reduce_mean(tf.subtract(1.0, y_true),0) #frequency of zeros along columns (axis 0, per variable)
         freq01 = tf.stack([freq0, freq1], 0) #stack M frequencies generated, resulting into a 2xM tensor
         alpha = tf.reduce_min(freq01, 0) #return smallest value per colum
+        alpha = tf.add(1.0, freq01) #return smallest value per colum
+        alpha = tf.cast(alpha, tf_precision)
+        return alpha, alpha
+    elif(freq_based_alpha==True):
+        alpha = freq_all_var
         alpha = tf.cast(alpha, tf_precision)
         return alpha, alpha
 
