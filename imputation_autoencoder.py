@@ -73,6 +73,9 @@ par_mask_method = "threadpool" #["serial","threadpool","thread","joblib","ray"] 
 do_parallel_numpy_per_cycle = True #whole cycle in parallel
 do_parallel_gd_and_mask = False #instead of parallelizing masking only, run masking and gradient descent in parallel
 
+############Performance options: tensorflow options
+tf_precision = tf.float32 #either tf.float32 or tf.float64
+
 ############Performance options: future improvements
 use_cuDF = False #TODO enable data loading directly in the GPU
 
@@ -93,15 +96,16 @@ common_threshold2 = 1
 ############Learning options
 categorical = "False" #False: treat variables as numeric allele count vectors [0,2], True: treat variables as categorical values (0,1,2)(Ref, Het., Alt)
 split_size = 100 #number of batches
-training_epochs = 499 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 25000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
-#761 permutations will start masking 1 marker at a time, and will finish masking 90% of markers
+training_epochs = 35000 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 35000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
+#minimum training_epochs recommended for grid search training_epochs=499 (starts at 0)
 last_batch_validation = False #when k==1, you may use the last batch for valitation if you want
 alt_signal_only = False #TODO Wether to treat variables as alternative allele signal only, like Minimac4, estimating the alt dosage
 all_sparse=True #set all hidden layers as sparse
 custom_beta=False #if True, beta scaling factor is proportional to number of features
 average_loss=False #True/False use everage loss, otherwise total sum will be calculated
-disable_alpha=True #disable alpha for debugging only
-inverse_alpha=False
+disable_alpha=False #disable alpha for debugging only
+inverse_alpha=False #experimental feature, do not enable it for now
+freq_based_alpha=True #alpha is calculated based on the frequency of the least frequent class
 early_stop_begin=1 #after what epoch to start monitoring the early stop criteria
 window=500 #stop criteria, threshold on how many epochs without improvement in average loss, if no improvent is observed, then interrupt training
 hysteresis=0.0001 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
@@ -704,11 +708,11 @@ def variable_summaries(var):
         tf.summary.histogram('histogram', var)
 
 def logfunc(x, x2):
-    x = tf.cast(x, tf.float64)
-    x2 = tf.cast(x2, tf.float64)
+    x = tf.cast(x, tf_precision)
+    x2 = tf.cast(x2, tf_precision)
     
-    eps=tf.cast(1e-14, tf.float64)
-    one=tf.cast(1.0, tf.float64)
+    eps=tf.cast(1e-14, tf_precision)
+    one=tf.cast(1.0, tf_precision)
     eps2 = tf.subtract(one,eps)
     
     cx = tf.clip_by_value(x, eps, eps2)
@@ -720,8 +724,8 @@ def logfunc(x, x2):
 #The result of this equation is added to the loss function result as an additional penalty to the loss based on sparsity
 def KL_Div(rho, rho_hat):
 
-    rho = tf.cast(rho, tf.float64)
-    rho_hat = tf.cast(rho_hat, tf.float64)
+    rho = tf.cast(rho, tf_precision)
+    rho_hat = tf.cast(rho_hat, tf_precision)
 
     KL_loss = rho * logfunc(rho, rho_hat) + (1 - rho) * logfunc((1 - rho), (1 - rho_hat))
     
@@ -734,9 +738,6 @@ def KL_Div(rho, rho_hat):
     #RR KL2 is the classic sparsity implementation, source reference: https://github.com/elykcoldster/sparse_autoencoder/blob/master/mnist_sae.py
     #https://web.stanford.edu/class/cs294a/sparseAutoencoder_2011new.pdf
 def pearson_r_loss(y_true, y_pred):
-    
-    #y_true = tf.cast(y_true, tf.float32)
-    #y_pred = tf.cast(y_pred, tf.float32)
     
     pearson_r, update_op = tf.contrib.metrics.streaming_pearson_correlation(y_pred, y_true, name='pearson_r')
     # find all variables created for this metric
@@ -775,8 +776,8 @@ def weighted_MSE(y_pred, y_true):
 
 def calculate_pt(y_pred, y_true):
 
-    y_pred = tf.cast(y_pred, tf.float64)
-    y_true = tf.cast(y_true,tf.float64)
+    y_pred = tf.cast(y_pred, tf_precision)
+    y_true = tf.cast(y_true,tf_precision)
 
     pt_1 = tf.where(tf.equal(y_true, 1), y_pred, tf.ones_like(y_pred))
 
@@ -794,9 +795,9 @@ def calculate_pt(y_pred, y_true):
 def calculate_CE(y_pred, y_true):
 
     pt_0, pt_1 = calculate_pt(y_pred, y_true)
-    one = tf.cast(1.0, tf.float64)
-    #eps=tf.cast(1.0+1e-8, tf.float64)
-    n1 =  tf.cast(-1.0, tf.float64)
+    one = tf.cast(1.0+1e-6, tf_precision)
+    #eps=tf.cast(1.0+1e-8, tf_precision)
+    n1 =  tf.cast(-1.0, tf_precision)
 
     CE_1 = tf.multiply(n1,tf.log(pt_1))
     CE_0 = tf.multiply(n1,tf.log(tf.subtract(one,pt_0)))
@@ -819,13 +820,22 @@ def cross_entropy(y_pred, y_true):
 
     return CE
 
-def calculate_alpha():
+def calculate_alpha(y_true):
 
-    one=tf.cast(1.0, tf.float64)
-    eps=tf.cast(1.0-1e-4, tf.float64)
+    one=tf.cast(1.0, tf_precision)
+    eps=tf.cast(1.0-1e-4, tf_precision)
 
-    alpha = tf.multiply(tf.cast(MAF_all_var_vector,tf.float64),2.0)
+    alpha = tf.multiply(tf.cast(MAF_all_var_vector,tf_precision),2.0)
     alpha = tf.clip_by_value(alpha, 1e-4, eps)
+
+    #return the frequency of the least frequent class per variable
+    if(freq_based_alpha==True):
+        freq1 = tf.reduce_mean(y_true, 0) #frequency of ones along columns (axis 0, per variable)
+        freq0 = tf.reduce_mean(tf.subtract(1.0, y_true),0) #frequency of zeros along columns (axis 0, per variable)
+        freq01 = tf.stack([freq0, freq1], 0) #stack M frequencies generated, resulting into a 2xM tensor
+        alpha = tf.reduce_min(freq01, 0) #return smallest value per colum
+        alpha = tf.cast(alpha, tf_precision)
+        return alpha, alpha
 
     if(inverse_alpha==True):
         alpha_1 = tf.divide(one, alpha)
@@ -838,15 +848,15 @@ def calculate_alpha():
 
 def weighted_cross_entropy(y_pred, y_true):
 
-    one=tf.cast(1.0, tf.float64)
-    eps=tf.cast(1.0+1e-8, tf.float64)
-    n1 =  tf.cast(-1.0, tf.float64)
+    one=tf.cast(1.0, tf_precision)
+    eps=tf.cast(1.0+1e-8, tf_precision)
+    n1 =  tf.cast(-1.0, tf_precision)
 
     #pt_0, pt_1 = calculate_pt(y_pred, y_true)
 
     CE_0, CE_1 =  calculate_CE(y_pred, y_true)
 
-    alpha_0, alpha_1 = calculate_alpha()
+    alpha_0, alpha_1 = calculate_alpha(y_true)
 
     WCE_per_var_1 = tf.multiply(CE_1, alpha_1)
     WCE_per_var_0 = tf.multiply(CE_0, alpha_0)
@@ -864,10 +874,10 @@ def weighted_cross_entropy(y_pred, y_true):
 
 def calculate_gamma(y_pred, y_true):
     
-    one=tf.cast(1.0, tf.float64)
-    #eps=tf.cast(1.0+1e-10, tf.float64)
+    one=tf.cast(1.0, tf_precision)
+    #eps=tf.cast(1.0+1e-10, tf_precision)
 
-    my_gamma=tf.cast(gamma, tf.float64)
+    my_gamma=tf.cast(gamma, tf_precision)
 
     pt_0, pt_1 = calculate_pt(y_pred, y_true)
 
@@ -890,11 +900,11 @@ def calculate_gamma(y_pred, y_true):
 #ref: https://towardsdatascience.com/handling-imbalanced-datasets-in-deep-learning-f48407a0e758
 def focal_loss(y_pred, y_true):
     
-    one=tf.cast(1.0, tf.float64)
+    one=tf.cast(1.0, tf_precision)
     
     CE_0, CE_1 =  calculate_CE(y_pred, y_true)
 
-    alpha_0, alpha_1 = calculate_alpha()
+    alpha_0, alpha_1 = calculate_alpha(y_true)
 
     FL_per_var_1_a = CE_1[:,1::2]
     FL_per_var_0_a = CE_0[:,1::2]
@@ -935,39 +945,14 @@ def focal_loss(y_pred, y_true):
 
     return FL
 
-def fl01(y_pred, y_true):
-    
-    #avoid making useless calculations if gamma==0
-    #if(gamma==0):
-    #    WCE = weighted_cross_entropy(y_pred, y_true)
-    #    return WCE
-
-    one=tf.cast(1.0, tf.float64)
-    #eps=tf.cast(1.0+1e-8, tf.float64)
-    
-    CE_0, CE_1 =  calculate_CE(y_pred, y_true)
-
-    alpha_0, alpha_1 = calculate_alpha()
-
-    FL_per_var_1 = tf.multiply(CE_1, alpha_1)
-    FL_per_var_0 = tf.multiply(CE_0, alpha_0)
-     
-    FL_per_var_1 = tf.multiply(FL_per_var_1, gamma_1)
-    FL_per_var_0 = tf.multiply(FL_per_var_0, gamma_0)
-
-    FL_1 = tf.reduce_sum(FL_per_var_1)
-    FL_0 = tf.reduce_sum(FL_per_var_0)
-
-    return FL_0, FL_1
-
 def f1_score(y_pred, y_true, sess):
     
     f1s = [0, 0, 0]
-    two = tf.cast(2.0, tf.float64)
-    eps = tf.cast(1e-8, tf.float64)
+    two = tf.cast(2.0, tf_precision)
+    eps = tf.cast(1e-8, tf_precision)
 
-    y_true = tf.cast(y_true, tf.float64)
-    y_pred = tf.cast(y_pred, tf.float64)
+    y_true = tf.cast(y_true, tf_precision)
+    y_pred = tf.cast(y_pred, tf_precision)
     
     y_true = tf.clip_by_value(y_true, 0.0, 1.0) #in case the input encoding is [0,1,2]
     y_pred = tf.clip_by_value(y_pred, 0.0, 1.0)
@@ -977,9 +962,9 @@ def f1_score(y_pred, y_true, sess):
         FP = tf.count_nonzero(tf.multiply(y_pred, tf.subtract(y_true,1.0)), axis=axis)
         FN = tf.count_nonzero(tf.multiply(tf.subtract(y_pred,1.0),y_true), axis=axis)
         
-        TP = tf.cast(TP, tf.float64)
-        FP = tf.cast(FP, tf.float64)
-        FN = tf.cast(FN, tf.float64)
+        TP = tf.cast(TP, tf_precision)
+        FP = tf.cast(FP, tf_precision)
+        FN = tf.cast(FN, tf_precision)
         
         TP = tf.add(TP, eps)
         
@@ -1076,7 +1061,7 @@ def dropout(input, name, kp):
 
 #Encodes a Hidden layer
 def encoder(x, func, l1_val, l2_val, weights, biases, units_num, keep_rate): #RR added keep_rate
-    x=tf.cast(x, tf.float64)
+    x=tf.cast(x, tf_precision)
     
     print("Setting up encoder/decoder.")
     if(l2_val==0):
@@ -1127,7 +1112,7 @@ def encoder(x, func, l1_val, l2_val, weights, biases, units_num, keep_rate): #RR
         
 def decoder(x, func, weights, biases):
     
-    x = tf.cast(x, tf.float64)
+    x = tf.cast(x, tf_precision)
     
     if(loss_type=="CE" or loss_type=="WCE" or loss_type=="FL"):
         entropy_loss = True
@@ -1417,9 +1402,9 @@ def mean_estimated_r2_GPU(x, categorical=False):
     #I copy this from Minimac4 source code, exactly as it is in Minimac4
     #Credits to Minimac4 authors
         r2hat=0
-        mycount = tf.cast(len(x_genotypes), tf.float64)
-        mysum = tf.cast(0, tf.float64)
-        mysum_Sq = tf.cast(0, tf.float64)
+        mycount = tf.cast(len(x_genotypes), tf_precision)
+        mysum = tf.cast(0, tf_precision)
+        mysum_Sq = tf.cast(0, tf_precision)
         
         if(MAF==0): #dont waste time
             #print("r2hat", r2hat)
@@ -1434,14 +1419,14 @@ def mean_estimated_r2_GPU(x, categorical=False):
             
             if (d>0.5):
                 d = 1-d
-                d = tf.cast(d, tf.float64)
+                d = tf.cast(d, tf_precision)
             mysum_Sq = sess.run(tf.add(mysum_Sq, tf.multiply(d,d)))
             mysum = sess.run(tf.add(mysum,d))
         
         if(mycount < 2):#return 0
             #print("r2hat", r2hat)
             return r2hat
-        myvar = tf.cast(1e-30, tf.float64)
+        myvar = tf.cast(1e-30, tf_precision)
         myf = sess.run(tf.div(mysum,tf.add(mycount,myvar)))
         #print("myf", myf)
         myevar = sess.run( tf.multiply(myf, tf.subtract(1.0,myf) ) )
@@ -1611,10 +1596,6 @@ def accuracy_maf_threshold(sess, x, y, MAFs, threshold1=0, threshold2=1, categor
     accuracy_per_marker = np.mean(correct_prediction.astype(float), 0)
     accuracy = np.mean(accuracy_per_marker)
 
-    #correct_prediction = sess.run(tf.equal( tf.round( filtered_data_x ), tf.round( filtered_data_y ) ))
-    #accuracy_per_marker = sess.run(tf.reduce_mean(tf.cast(correct_prediction, tf.float32), 0))
-    #accuracy = sess.run(tf.reduce_mean(accuracy_per_marker))
-
     return accuracy, accuracy_per_marker
 
 def MSE_maf_threshold(sess, x, y, MAFs, threshold1=0, threshold2=1, categorical=False):
@@ -1639,9 +1620,6 @@ def accuracy_maf_threshold_global(sess, x, y, indexes_to_keep):
     accuracy_per_marker = np.mean(correct_prediction.astype(float), 0)
     accuracy = np.mean(accuracy_per_marker)
 
-    #correct_prediction = sess.run(tf.equal( tf.round( filtered_data_x ), tf.round( filtered_data_y ) ))
-    #accuracy_per_marker = sess.run(tf.reduce_mean(tf.cast(correct_prediction, tf.float32), 0))
-    #accuracy = sess.run(tf.reduce_mean(accuracy_per_marker))
 
     return accuracy, accuracy_per_marker
 
@@ -1680,19 +1658,19 @@ def flatten_data_np(x):
 
 def define_weights(ni,nh,no,last_layer=False):
     w = {
-        'encoder_h1': tf.Variable(tf.random_normal([ni, nh], dtype=tf.float64), name="w_encoder_h1"),
+        'encoder_h1': tf.Variable(tf.random_normal([ni, nh], dtype=tf_precision), name="w_encoder_h1"),
     }
     if(last_layer==True):
-        w['decoder_h1']=tf.Variable(tf.random_normal([nh, no], dtype=tf.float64), name="w_decoder_h1")
+        w['decoder_h1']=tf.Variable(tf.random_normal([nh, no], dtype=tf_precision), name="w_decoder_h1")
     return w
 
 def define_biases(nh,no,last_layer=False):
     
     b = {
-        'encoder_b1': tf.Variable(tf.random_normal([nh], dtype=tf.float64), name="b_encoder_b1"),
+        'encoder_b1': tf.Variable(tf.random_normal([nh], dtype=tf_precision), name="b_encoder_b1"),
     }
     if(last_layer==True):
-        b['decoder_b1']=tf.Variable(tf.random_normal([no], dtype=tf.float64), name="b_decoder_b1")
+        b['decoder_b1']=tf.Variable(tf.random_normal([no], dtype=tf_precision), name="b_decoder_b1")
     return b
 #Code modified from example
 #https://stackoverflow.com/questions/44367010/python-tensor-flow-relu-not-learning-in-autoencoder-task
@@ -1702,10 +1680,10 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     
     #custom beta will scale sparsity loss proportional to the number of features
     if(custom_beta==True and beta>0):
-        beta = tf.cast(beta*data_obs.shape[1], tf.float64)
+        beta = tf.cast(beta*data_obs.shape[1], tf_precision)
     #otherwise, just scale sparsity loss by using beta as an absolute scaling value
     else:
-        beta = tf.cast(beta, tf.float64)
+        beta = tf.cast(beta, tf_precision)
     
     print("Running autoencoder.")
     
@@ -1846,19 +1824,19 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
     with tf.name_scope('sparsity'):
         sparsity_loss = tf.reduce_mean(KL_Div(rho, rho_hat))
-        sparsity_loss = tf.cast(sparsity_loss, tf.float64)
+        sparsity_loss = tf.cast(sparsity_loss, tf_precision)
         #sparsity_loss = tf.clip_by_value(sparsity_loss, 1e-10, 1.0) #RR KL divergence, clip to avoid Inf or div by zero
 
         if(NH>=2 and all_sparse==True):
-            sparsity_loss2 = tf.cast(tf.reduce_mean(KL_Div(rho, rho_hat2)), tf.float64)
+            sparsity_loss2 = tf.cast(tf.reduce_mean(KL_Div(rho, rho_hat2)), tf_precision)
             #sparsity_loss2 = tf.clip_by_value(sparsity_loss2, 1e-10, 1.0) #RR KL divergence, clip to avoid Inf or div by zero
             sparsity_loss = tf.add(sparsity_loss, sparsity_loss2)
 
         if(NH==3 and all_sparse==True):
-            sparsity_loss3 = tf.cast(tf.reduce_mean(KL_Div(rho, rho_hat3)), tf.float64)
+            sparsity_loss3 = tf.cast(tf.reduce_mean(KL_Div(rho, rho_hat3)), tf_precision)
             sparsity_loss = tf.add(sparsity_loss, sparsity_loss3)
             
-        sparsity_loss = tf.cast(sparsity_loss, tf.float64, name="sparsity_loss") #RR KL divergence, clip to avoid Inf or div by zero
+        sparsity_loss = tf.cast(sparsity_loss, tf_precision, name="sparsity_loss") #RR KL divergence, clip to avoid Inf or div by zero
 
     tf.summary.scalar('sparsity_loss', sparsity_loss)
 
@@ -1867,7 +1845,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     with tf.name_scope('loss'):
 
         if(loss_type=="MSE"):
-            y_true = tf.cast(y_true, tf.float64)
+            y_true = tf.cast(y_true, tf_precision)
             reconstruction_loss = tf.reduce_mean(tf.square(tf.subtract(y_true,y_pred)), name="reconstruction_loss") #RR simplified the code bellow
         elif(loss_type=="Pearson"):
             reconstruction_loss = pearson_r_loss(y_pred, y_true)
@@ -1885,7 +1863,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 pt0, pt1 = calculate_pt(y_pred, y_true)
                 wce = weighted_cross_entropy(y_pred, y_true)
         else:
-            y_true = tf.cast(y_true, tf.float64)            
+            y_true = tf.cast(y_true, tf_precision)            
             reconstruction_loss = tf.reduce_mean(tf.square(tf.subtract(y_true,y_pred)), name="reconstruction_loss") #RR 
         # newly added sparsity function (RHO, BETA)
         #cost_sparse = tf.multiply(beta,  tf.reduce_sum(KL_Div(RHO, rho_hat)))
@@ -1909,7 +1887,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     correct_prediction = 0
     
     if(factors == False): #TODO: only factors==False is working now, TODO: fix the else: bellow
-        y_true = tf.cast(y_true, tf.float64)
+        y_true = tf.cast(y_true, tf_precision)
         correct_prediction = tf.equal( tf.round( y_pred ), tf.round( y_true ) )
     else:
         y_pred_shape = tf.shape(y_pred)
@@ -1931,7 +1909,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         #correct_prediction = tf.equal( y_pred, y_true )
                 
     
-    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float64), name="accuracy")
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf_precision), name="accuracy")
     cost_accuracy = tf.add((1-accuracy), tf.multiply(beta, sparsity_loss), name="cost_accuracy")
     tf.summary.scalar('accuracy', accuracy)
     tf.summary.scalar('cost_accuracy', cost_accuracy)
