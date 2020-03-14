@@ -74,7 +74,7 @@ do_parallel_numpy_per_cycle = True #whole cycle in parallel
 do_parallel_gd_and_mask = False #instead of parallelizing masking only, run masking and gradient descent in parallel
 
 ############Performance options: tensorflow options
-tf_precision = tf.float64 #either tf.float32 or tf.float64
+tf_precision = tf.float32 #either tf.float32 or tf.float64
 
 ############Performance options: future improvements
 use_cuDF = False #TODO enable data loading directly in the GPU
@@ -795,7 +795,7 @@ def calculate_pt(y_pred, y_true):
 def calculate_CE(y_pred, y_true):
 
     pt_0, pt_1 = calculate_pt(y_pred, y_true)
-    one = tf.cast(1.0, tf_precision)
+    one = tf.cast(1.0+1e-6, tf_precision)
     #eps=tf.cast(1.0+1e-8, tf_precision)
     n1 =  tf.cast(-1.0, tf_precision)
 
