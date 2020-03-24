@@ -104,7 +104,7 @@ all_sparse=True #set all hidden layers as sparse
 custom_beta=False #if True, beta scaling factor is proportional to number of features
 average_loss=False #True/False use everage loss, otherwise total sum will be calculated
 disable_alpha=False #disable alpha for debugging only
-inverse_alpha=True #experimental feature, do not enable it for now
+inverse_alpha=True #1/alpha, prioritize common variants
 freq_based_alpha=True #alpha is calculated based on the frequency of the least frequent class
 per_batch_alpha=False #alpha is calculated based on the frequency of the least frequent class per batch
 early_stop_begin=1 #after what epoch to start monitoring the early stop criteria
@@ -937,19 +937,6 @@ def focal_loss(y_pred, y_true):
 
     print("gamma",my_gamma)
 
-    '''
-    if(gamma>0):
-
-        gamma_0, gamma_1 = calculate_gamma(y_pred[:,1::2], y_true[:,1::2], my_gamma)
-
-        FL_per_var_1_a = tf.multiply(gamma_1, FL_per_var_1_a)
-        FL_per_var_0_a = tf.multiply(gamma_0, FL_per_var_0_a)
-
-        gamma_0, gamma_1 = calculate_gamma(y_pred[:,0::2], y_true[:,0::2], my_gamma)
-
-        FL_per_var_1_r = tf.multiply(gamma_1, FL_per_var_1_r)
-        FL_per_var_0_r = tf.multiply(gamma_0, FL_per_var_0_r)
-    '''
     gamma_0, gamma_1 = calculate_gamma(y_pred[:,1::2], y_true[:,1::2], my_gamma)
 
     FL_per_var_1_a = tf.multiply(gamma_1, FL_per_var_1_a)
