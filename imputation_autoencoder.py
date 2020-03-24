@@ -82,7 +82,7 @@ use_cuDF = False #TODO enable data loading directly in the GPU
 ############backup options and reporting options
 save_model = True #[True,False] save final model generated after all training epochs, generating a checkpoint that can be loaded and continued later
 save_pred = False #[True,False] save predicted results for each training epoch and for k-fold CV
-resuming_step = 3001 #number of first step if recovery mode True
+resuming_step = 0 #number of first step if recovery mode True
 save_summaries = False #save summaries for plotting in tensorboard
 detailed_metrics = False #time consuming, calculate additional accuracy metrics for every variant and MAF threshold
 report_perf_by_rarity = False #report performance for common versus rare variants
@@ -104,7 +104,7 @@ all_sparse=True #set all hidden layers as sparse
 custom_beta=False #if True, beta scaling factor is proportional to number of features
 average_loss=False #True/False use everage loss, otherwise total sum will be calculated
 disable_alpha=False #disable alpha for debugging only
-inverse_alpha=False #experimental feature, do not enable it for now
+inverse_alpha=True #experimental feature, do not enable it for now
 freq_based_alpha=True #alpha is calculated based on the frequency of the least frequent class
 per_batch_alpha=False #alpha is calculated based on the frequency of the least frequent class per batch
 early_stop_begin=1 #after what epoch to start monitoring the early stop criteria
@@ -450,7 +450,12 @@ def process_data(file, categorical="False"):
         freq0 = np.mean(np.subtract(1.0, y_true),0) #frequency of zeros along columns (axis 0, per variable)
         freq01 = np.stack([freq0, freq1], 0) #stack M frequencies generated, resulting into a 2xM array
         freq_all_var = np.amin(freq01, 0) #return smallest value per colum
-        freq_all_var = np.add(1.0,freq_all_var)
+        if(inverse_alpha == True):
+            #freq_all_var = np.subtract(1.0,freq_all_var)
+            freq_all_var = np.mean(y_true, 0) #frequency of ones along columns (axis 0, per variable)
+            freq_all_var = np.divide(1.0,freq_all_var)
+        else:
+            freq_all_var = np.add(1.0,freq_all_var)
 
     global MAF_all_var
     
@@ -889,12 +894,10 @@ def weighted_cross_entropy(y_pred, y_true):
     return WCE
 
 
-def calculate_gamma(y_pred, y_true):
-    
+def calculate_gamma(y_pred, y_true, my_gamma):
+
     one=tf.cast(1.0, tf_precision)
     #eps=tf.cast(1.0+1e-10, tf_precision)
-
-    my_gamma=tf.cast(gamma, tf_precision)
 
     pt_0, pt_1 = calculate_pt(y_pred, y_true)
 
@@ -927,18 +930,37 @@ def focal_loss(y_pred, y_true):
     FL_per_var_0_a = CE_0[:,1::2]
     FL_per_var_1_r = CE_1[:,0::2]
     FL_per_var_0_r = CE_0[:,0::2]
-    #avoid useless calculations
+
+    #my_gamma=tf.cast(gamma, tf_precision, name="gamma")
+    my_gamma=tf.Variable(gamma, name="gamma")
+    tf.add_to_collection('gamma', my_gamma)
+
+    print("gamma",my_gamma)
+
+    '''
     if(gamma>0):
-        gamma_0, gamma_1 = calculate_gamma(y_pred[:,1::2], y_true[:,1::2])
+
+        gamma_0, gamma_1 = calculate_gamma(y_pred[:,1::2], y_true[:,1::2], my_gamma)
 
         FL_per_var_1_a = tf.multiply(gamma_1, FL_per_var_1_a)
         FL_per_var_0_a = tf.multiply(gamma_0, FL_per_var_0_a)
-        
-        gamma_0, gamma_1 = calculate_gamma(y_pred[:,0::2], y_true[:,0::2])
+
+        gamma_0, gamma_1 = calculate_gamma(y_pred[:,0::2], y_true[:,0::2], my_gamma)
 
         FL_per_var_1_r = tf.multiply(gamma_1, FL_per_var_1_r)
         FL_per_var_0_r = tf.multiply(gamma_0, FL_per_var_0_r)
-     
+    '''
+    gamma_0, gamma_1 = calculate_gamma(y_pred[:,1::2], y_true[:,1::2], my_gamma)
+
+    FL_per_var_1_a = tf.multiply(gamma_1, FL_per_var_1_a)
+    FL_per_var_0_a = tf.multiply(gamma_0, FL_per_var_0_a)
+
+    gamma_0, gamma_1 = calculate_gamma(y_pred[:,0::2], y_true[:,0::2], my_gamma)
+
+    FL_per_var_1_r = tf.multiply(gamma_1, FL_per_var_1_r)
+    FL_per_var_0_r = tf.multiply(gamma_0, FL_per_var_0_r)
+
+
     if(disable_alpha==False):
         #extract and reweight alternative allele
         FL_per_var_1_a = tf.multiply(FL_per_var_1_a, alpha_1[1::2])
@@ -1875,7 +1897,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         elif(loss_type=="FL"):
             reconstruction_loss = focal_loss(y_pred, y_true)
             if(verbose>0):
-                mygamma_0, mygamma_1 = calculate_gamma(y_pred, y_true)
+                mygamma_0, mygamma_1 = calculate_gamma(y_pred, y_true,tf.cast(gamma, tf_precision))
                 ce0, ce1 = calculate_CE(y_pred, y_true)
                 pt0, pt1 = calculate_pt(y_pred, y_true)
                 wce = weighted_cross_entropy(y_pred, y_true)
@@ -2007,33 +2029,14 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             global_name=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=tf.get_variable_scope().name)
             local_name=tf.get_collection(tf.GraphKeys.LOCAL_VARIABLES, scope=tf.get_variable_scope().name)
             trainable_vars=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name)
-            '''
-            print("Global collection:", global_name)
-            print("Local collection:", local_name)
-            print("Trainable:", trainable_vars)
-            for i in tf.get_collection(tf.compat.v1.global_variables, scope='train'):
-                print("train:",i)
-            for i in tf.get_collection(tf.compat.v1.global_variables, scope='train'):
-                print("train:",i)
-            for i in tf.get_collection(tf.compat.v1.global_variables, scope='train'):
-                print("train:",i)
-            for i in tf.compat.v1.get_collection(tf.compat.v1.global_variables, scope='train'):
-                print("train1:",i)
-            for i in tf.compat.v1.get_collection(tf.compat.v1.global_variables, scope='train'):
-                print("train1:",i)
-            for i in tf.compat.v1.get_collection(tf.compat.v1.global_variables, scope='train'):
-                print("train1:",i)
-            a=[n.name for n in graph.as_graph_def().node]
-            print("node names:", a)
+            if(verbose>0):
+                print("Global collection:", global_name)
+                print("Local collection:", local_name)
+                print("Trainable:", trainable_vars)
 
-            print("scope:::", tf.compat.v1.get_default_graph().get_name_scope())
-            all_ops = graph.get_operations()
-            for el in all_ops:
-                print(el)
-            ''' 
             #optimizer = graph.get_tensor_by_name("optimizer:0")
 
-            a=[n.name for n in graph.as_graph_def().node]
+            a = [n.name for n in graph.as_graph_def().node]
             if("train/optimizer" in a):
                  optimizer = graph.get_operation_by_name( "train/optimizer" )
                  print("Restored", "train/optimizer")
@@ -2060,7 +2063,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 sparsity_loss = graph.get_tensor_by_name("sparsity/Add_4:0")
                 print("Restored", "sparsity_loss")
             else:
-                 print("ERROR OPTIMIZER NOT FOUND IN GRAPH. Nodes available: ", a)
+                print("ERROR OPTIMIZER NOT FOUND IN GRAPH. Nodes available: ", a)
 
             accuracy = graph.get_tensor_by_name("accuracy:0")
 
@@ -2068,31 +2071,43 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             #cost_accuracy = "cost_accuracy:0"
             cost_accuracy = graph.get_tensor_by_name("cost_accuracy:0")
             y_pred = graph.get_tensor_by_name("y_pred:0")
+           
+            v = [v.name for v in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)]
+            if("loss/gamma:0" in v):
+                new_gamma = [v for v in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES) if v.name == 'loss/gamma:0'][0]
+                print("Old gamma value", sess.run(new_gamma))
+                sess.run(tf.assign(new_gamma, gamma))
+                gamma_check = [v for v in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES) if v.name == 'loss/gamma:0'][0]
+                print("Checking if gamma value really changed:", sess.run(gamma_check))
+            else:
+                print("WARNING!!! Gamma variable not found. Searched for name loss/gamma:0.")
 
             tf.summary.scalar('reconstruction_loss_MSE', reconstruction_loss)
             tf.summary.scalar("final_cost", cost)
             tf.summary.scalar('accuracy', accuracy)
             tf.summary.scalar('cost_accuracy', cost_accuracy)
             tf.summary.scalar('sparsity_loss', sparsity_loss)
-            
+
+            '''
             weights = {
                 'encoder_h1': graph.get_tensor_by_name("weights/w_encoder_h1:0"),
                 'decoder_h1': graph.get_tensor_by_name("weights/w_decoder_h1:0"),
             }
             variable_summaries(weights['encoder_h1'])
-        
+
             biases = {
                 'encoder_b1': graph.get_tensor_by_name("biases/b_encoder_b1:0"),
                 'decoder_b1': graph.get_tensor_by_name("biases/b_decoder_b1:0"),
             }
-            variable_summaries(biases['encoder_b1'])
+            '''
+            #variable_summaries(biases['encoder_b1'])
             
             decoder_op = y_pred
             #encoder_op = graph.get_tensor_by_name("Wx_plus_b/activation:0")
             
-            encoder_op =  graph.get_tensor_by_name("Wx_plus_b/dense/BiasAdd:0")
+            #encoder_op =  graph.get_tensor_by_name("Wx_plus_b/dense/BiasAdd:0")
 
-            tf.summary.histogram('activations', encoder_op)
+            #tf.summary.histogram('activations', encoder_op)
 
             if(save_summaries==True):
 
