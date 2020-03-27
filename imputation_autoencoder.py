@@ -65,6 +65,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 ############Performance options: data loading
 do_parallel = False #load data and preprocess it in parallel
 do_parallel_MAF = False #also do MAF calculation in parallel, otherwise use PLINK
+use_scikit_allel = True #use scikit-ellel to load the data, recommended, requires installation of skikit-allel package
 
 ############Performance options: masking
 do_numpy_masking = True #array based method, much faster then nested for loops!
@@ -105,7 +106,7 @@ custom_beta=False #if True, beta scaling factor is proportional to number of fea
 average_loss=False #True/False use everage loss, otherwise total sum will be calculated
 disable_alpha=False #disable alpha for debugging only
 inverse_alpha=True #1/alpha, prioritize common variants
-freq_based_alpha=True #alpha is calculated based on the frequency of the least frequent class
+freq_based_alpha=True #latest update, alpha is calculated based on the frequency of the least frequent class
 per_batch_alpha=False #alpha is calculated based on the frequency of the least frequent class per batch
 early_stop_begin=1 #after what epoch to start monitoring the early stop criteria
 window=500 #stop criteria, threshold on how many epochs without improvement in average loss, if no improvent is observed, then interrupt training
@@ -126,7 +127,32 @@ calculate_acc_per_epoch=False
 verbose=0
 
 ###################################OPTIONS#############################################
- 
+
+def cmd_exists(cmd):
+    for path in os.environ["PATH"].split(os.pathsep):
+        if(os.access(os.path.join(path, cmd), os.X_OK) == True):
+            return path+"/"+cmd
+    return False
+
+if(use_scikit_allel==True):
+    import allel
+    tabix_path = cmd_exists('tabix')
+    if(tabix_path == False):
+        tabix_path='/opt/applications/samtools/1.9/gnu/bin/tabix'
+        if(os.path.isfile(tabix_path)==False):
+            print("WARNING!!! Tabix not found, VCF extraction may be slow, VCF loading may crash!!!")
+        else:
+            print ("Using tabix at:", tabix_path)
+    else:
+        print ("Using tabix at:", tabix_path)
+
+if(do_parallel_MAF == False):
+    plink_path = cmd_exists('plink')
+    if(plink_path == False):
+        print("WARNING!!! Plink not found, MAF calculation may crash!!!")
+    else:
+        print ("Using plink at:", plink_path)
+
 #global variables
 MAF_all_var = [] #MAF calculated only once for all variants,remove redundancies
 freq_all_var = []
@@ -139,6 +165,12 @@ config.intra_op_parallelism_threads = 0 #0=auto
 config.inter_op_parallelism_threads = 0 #0=auto
 config.gpu_options.allow_growth=True
 model_index=0
+
+#utility numbers used many times by many formulas
+eps = tf.cast(1e-6, tf_precision)
+one = tf.cast(1.0, tf_precision)
+n1 = tf.cast(-1.0, tf_precision)
+
 
 if(par_mask_method == "joblib"):
     import joblib
@@ -391,23 +423,36 @@ def convert_to_float(frac_str):
 
 
 def process_data(file, categorical="False"):
-     
+    
     #Header and column names start with hashtag, skip those
     ncols = pd.read_csv(file, sep='\t', comment='#',header=None, nrows=1)    
     ncols = ncols.shape[1]
     
     print("Processing input data.")
     print("categorical: ", categorical)
+    print("use_scikit_allel: ", use_scikit_allel)
+
     n_samples = ncols-9
     #RR subtract 9 from the number of columns to get the number of SNPs, 
     #RR because the first 9 columns are variant information, not genotypes
     print("number of samples: ", n_samples)
     
     indexes = list(range(10,ncols+1)) #bash cut index is 1-based
-            
+    
     start = timeit.default_timer()
     
-    if(do_parallel==False):
+    if(use_scikit_allel==True):
+        callset = allel.read_vcf(file, tabix=tabix_path)
+        my_GT = callset['calldata/GT']
+        my_GT = allel.GenotypeArray(my_GT,dtype='i1')
+        my_GT = my_GT.to_n_alt(fill=-1)
+        my_GT = my_GT.T
+        ds_to_allel_presence_prob = {0:[1,0], 1:[1,1], 2:[0,1], -1: [0,0]}
+        results = np.zeros([my_GT.shape[0],my_GT.shape[1],2])
+        for old, new in ds_to_allel_presence_prob.items():
+            results[my_GT == old] = new
+
+    elif(do_parallel==False):
         results = convert_genotypes_to_int(indexes, file, categorical)
         print( len(results), len(results[0]), len(results[0][0]))
 
@@ -728,12 +773,8 @@ def logfunc(x, x2):
     x = tf.cast(x, tf_precision)
     x2 = tf.cast(x2, tf_precision)
     
-    eps=tf.cast(1e-14, tf_precision)
-    one=tf.cast(1.0, tf_precision)
-    eps2 = tf.subtract(one,eps)
-    
-    cx = tf.clip_by_value(x, eps, eps2)
-    cx2 = tf.clip_by_value(x2, eps, eps2)
+    cx = tf.clip_by_value(x, eps, one)
+    cx2 = tf.clip_by_value(x2, eps, one)
     return tf.multiply( x, tf.log(tf.div(cx,cx2)))
 
 
@@ -799,25 +840,23 @@ def calculate_pt(y_pred, y_true):
     pt_1 = tf.where(tf.equal(y_true, 1), y_pred, tf.ones_like(y_pred))
 
     #ref:https://github.com/unsky/focal-loss/blob/master/focal_loss.py
-    pt_1 = tf.clip_by_value(pt_1, 1e-10, 1.0-1e-10) #avoid log(0) that returns inf
+    pt_1 = tf.clip_by_value(pt_1, eps, one) #avoid log(0) that returns inf
     #pt_1 = tf.add(pt_1, 1e-8) #avoid log(0) that returns inf
 
     #if value is zero in y_true, than take value from y_pred, otherwise, write zeros
     pt_0 = tf.where(tf.equal(y_true, 0), y_pred, tf.zeros_like(y_pred))
 
-    pt_0 = tf.clip_by_value(pt_0, 1e-10, 1.0-1e-10)
+    pt_0 = tf.clip_by_value(pt_0, eps, one)
         
     return pt_0, pt_1
 
 def calculate_CE(y_pred, y_true):
 
     pt_0, pt_1 = calculate_pt(y_pred, y_true)
-    one = tf.cast(1.0+1e-6, tf_precision)
-    #eps=tf.cast(1.0+1e-8, tf_precision)
-    n1 =  tf.cast(-1.0, tf_precision)
+    one_eps = tf.cast(1.0+1e-6, tf_precision)
 
     CE_1 = tf.multiply(n1,tf.log(pt_1))
-    CE_0 = tf.multiply(n1,tf.log(tf.subtract(one,pt_0)))
+    CE_0 = tf.multiply(n1,tf.log(tf.subtract(one_eps,pt_0)))
 
     return CE_0, CE_1
 
@@ -839,12 +878,6 @@ def cross_entropy(y_pred, y_true):
 
 def calculate_alpha(y_true):
 
-    one=tf.cast(1.0, tf_precision)
-    eps=tf.cast(1.0-1e-4, tf_precision)
-
-    alpha = tf.multiply(tf.cast(MAF_all_var_vector,tf_precision),2.0)
-    alpha = tf.clip_by_value(alpha, 1e-4, eps)
-
     #return the frequency of the least frequent class per variable
     if(per_batch_alpha==True):
         freq1 = tf.reduce_mean(y_true, 0) #frequency of ones along columns (axis 0, per variable)
@@ -859,6 +892,11 @@ def calculate_alpha(y_true):
         alpha = tf.cast(alpha, tf_precision)
         return alpha, alpha
 
+    one_eps=tf.cast(1.0-1e-6, tf_precision)
+
+    alpha = tf.multiply(tf.cast(MAF_all_var_vector,tf_precision),2.0)
+    alpha = tf.clip_by_value(alpha, eps, one_eps)
+
     if(inverse_alpha==True):
         alpha_1 = tf.divide(one, alpha)
         alpha_0 = tf.divide(one, tf.subtract(one,alpha))
@@ -869,10 +907,6 @@ def calculate_alpha(y_true):
     return alpha_0, alpha_1
 
 def weighted_cross_entropy(y_pred, y_true):
-
-    one=tf.cast(1.0, tf_precision)
-    eps=tf.cast(1.0+1e-8, tf_precision)
-    n1 =  tf.cast(-1.0, tf_precision)
 
     #pt_0, pt_1 = calculate_pt(y_pred, y_true)
 
@@ -896,9 +930,6 @@ def weighted_cross_entropy(y_pred, y_true):
 
 def calculate_gamma(y_pred, y_true, my_gamma):
 
-    one=tf.cast(1.0, tf_precision)
-    #eps=tf.cast(1.0+1e-10, tf_precision)
-
     pt_0, pt_1 = calculate_pt(y_pred, y_true)
 
     #if statement to avoid useless calculaions
@@ -919,8 +950,6 @@ def calculate_gamma(y_pred, y_true, my_gamma):
 
 #ref: https://towardsdatascience.com/handling-imbalanced-datasets-in-deep-learning-f48407a0e758
 def focal_loss(y_pred, y_true):
-    
-    one=tf.cast(1.0, tf_precision)
     
     CE_0, CE_1 =  calculate_CE(y_pred, y_true)
 
@@ -953,8 +982,8 @@ def focal_loss(y_pred, y_true):
         FL_per_var_1_a = tf.multiply(FL_per_var_1_a, alpha_1[1::2])
         FL_per_var_0_a = tf.multiply(FL_per_var_0_a, alpha_0[1::2])
         #extract and reweight reference allele
-        FL_per_var_1_r = tf.multiply(FL_per_var_1_r, alpha_0[0::2])
-        FL_per_var_0_r = tf.multiply(FL_per_var_0_r, alpha_1[0::2])
+        FL_per_var_1_r = tf.multiply(FL_per_var_1_r, alpha_1[0::2])
+        FL_per_var_0_r = tf.multiply(FL_per_var_0_r, alpha_0[0::2])
  
     FL_1_a = tf.reduce_sum(FL_per_var_1_a)
     FL_0_a = tf.reduce_sum(FL_per_var_0_a)
@@ -975,7 +1004,6 @@ def f1_score(y_pred, y_true, sess):
     
     f1s = [0, 0, 0]
     two = tf.cast(2.0, tf_precision)
-    eps = tf.cast(1e-8, tf_precision)
 
     y_true = tf.cast(y_true, tf_precision)
     y_pred = tf.cast(y_pred, tf_precision)
@@ -1036,7 +1064,7 @@ def pearson_r2(x_in, y_in):
     den2=np.subtract(den2, np.power(y_sum,2))
     den=np.sqrt(np.multiply(den, den2))
 
-    eps=1e-15
+    eps=1e-6
 
     num = np.add(eps,num)
     den = np.add(eps,den)
@@ -1815,7 +1843,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     y_pred = decoder(encoder_operators[-1], act_val, weights_per_layer[NH-1], biases_per_layer[NH-1])            
     print(encoder_operators[-1])
     tf.summary.histogram('activations', encoder_operators[1])
-               
+
     #encoder_result = encoder_op
     y_pred = tf.identity(y_pred, name="y_pred")
 
@@ -2173,12 +2201,12 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         
         if(save_summaries==True):
             if(verbose>1):
-                train_args = [merged,optimizer, cost, accuracy, reconstruction_loss, mygamma_0, mygamma_1, ce0, ce1,pt0, pt1, wce, y_pred]
+                train_args = [merged,optimizer, cost, accuracy, reconstruction_loss, sparsity_loss, mygamma_0, mygamma_1, ce0, ce1,pt0, pt1, wce, y_pred]
             else:
                 train_args = [merged,optimizer, cost, accuracy, reconstruction_loss, y_pred]
         else:
             if(verbose>1):
-                train_args = [optimizer, cost, accuracy, reconstruction_loss, mygamma_0, mygamma_1, ce0, ce1, pt0, pt1, wce, y_pred]
+                train_args = [optimizer, cost, accuracy, reconstruction_loss, sparsity_loss, mygamma_0, mygamma_1, ce0, ce1, pt0, pt1, wce, y_pred]
             else:
                 if(calculate_r2_per_epoch==True):
                     train_args = [optimizer, cost, accuracy, reconstruction_loss, y_pred]
@@ -2365,14 +2393,14 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
                     if(save_summaries==True):
                         if(verbose>1):
-                            summary, _, c, a, rl, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = my_result
+                            summary, _, c, a, rl, sl, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = my_result
                         else:
                             summary, _, c, a, rl, myy = my_result
                         train_writer.add_run_metadata(run_metadata, 'k%03d-step%03d-batch%04d' % (ki, epoch, i) )
                         train_writer.add_summary(summary, epoch)
                     else:
                         if(verbose>1):
-                            _, c, a, rl, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = my_result
+                            _, c, a, rl, sl, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = my_result
                         else:
                             if(calculate_r2_per_epoch==True):
                                 _, c, a, rl, myy = my_result
@@ -2466,7 +2494,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 
 ################Epoch end here
             if(verbose>1):
-                print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", epoch_cost, " Accuracy:", avg_a, " Reconstruction loss (" , loss_type, "): ", avg_rl, "ce0:", myce0, "ce1:", myce1, "sr2:", avg_r2, flush=True)
+                print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", epoch_cost, " Accuracy:", avg_a, " Reconstruction loss (" , loss_type, "): ", avg_rl, "Sparsity loss:", sl,"sr2:", avg_r2, flush=True)
                 print("Shape pt0:", mypt0)
                 print("Shape pt1:", mypt1)
                 print("Shape g0:", g0)
