@@ -61,8 +61,8 @@ model_path = model_dir+"/inference_model-best.ckpt"
 #included multi-model support
 if(len(sys.argv)==6):
     model_index=sys.argv[5]
-    meta_path = model_dir+"/inference_model-best_M"+model_index+".ckpt.meta"
-    model_path = model_dir+"/inference_model-best_M"+model_index+".ckpt"
+    meta_path = model_dir+"/"+model_index+".meta"
+    model_path = model_dir+"/"+model_index
 
 
 
@@ -275,6 +275,10 @@ with tf.Session(config=config) as sess:
     #for g_var in tf.local_variables():
     #    print(g_var)
 
+    #graph = sess.graph
+
+    #a=[n.name for n in graph.as_graph_def().node]
+    #print(a)
     #optimizer = graph.get_operation_by_name( "optimizer" )
     #print(sess.run('Y:0', feed_dict={"X:0": new_df, "Y:0": new_df}))
     #print(sess.run('X:0', feed_dict={"X:0": new_df, "Y:0": new_df}))
