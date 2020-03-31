@@ -1,16 +1,5 @@
 # coding: utf-8
 
-#current update: enable parallel gradient descent step and masking
-#previous update: enabled support for cross entropy loss (CE), weighted CE, and focal loss, suuport for multiple optimizers
-
-#Batch mode example
-#python3.6 ../10-fold_CV_imputation_autoencoder_from_grid_search_v3_online_data_augmentation_parallel.py ../HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf.clean3.subset1000 best_hp_set.txt False 0 0
-#/bin/python3.6 script_name.py imputed_test_subset.vcf 3_hyper_par_set.txt False 0 0
-#CUDA_VISIBLE_DEVICES=0 /bin/python3.6 ../script_name.py imputed_test_subset.vcf 3_hyper_par_set.txt True 0 0
-
-#sequential mode
-#python3.6 ../10fold_CV_imputation_autoencoder_from_grid_search_v3_online_data_augmentation_parallel.py ../HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf.clean4 0.039497493748 0.001096668917 0.001 0.021708661247 sigmoid 5.6489904e-05 3 Adam FL False 0 0
-
 import math #sqrt
 import tensorflow as tf
 import numpy as np #pip install numpy==1.16.4
@@ -23,18 +12,12 @@ from operator import itemgetter
 
 import timeit #measure runtime
 
-#from tqdm import tqdm # progress bar
-
-from scipy.stats import pearsonr #remove this, nan bugs are not corrected
-
-from tensorflow.python.client import device_lib #get_available_devices()
-
 from scipy.stats import linregress
-#linregress(a, b)[2] gives the correlation, correcting for nans due to monomorphic predictions
-#linregress(a, b)[3] gives the p-value correl 
-#a are all the predicted genotypes for one given SNP, in ALT dosage form, b is the same but for experimental SNPs
 
-import sys #arguments
+#arguments
+import sys
+import argparse
+
 import operator #remove entire columns from 2d arrays
 
 import subprocess as sp #run bash commands that are much faster than in python (i.e cut, grep, awk, etc)
@@ -45,26 +28,10 @@ import os
 import multiprocessing
 from functools import partial # pool.map with multiple args
 
-
-import warnings
-
-warnings.filterwarnings('ignore', category=DeprecationWarning)
-warnings.filterwarnings('ignore', category=FutureWarning)
-
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-#try:
-#    from tensorflow.python.util import module_wrapper as deprecation
-#except ImportError:
-#    from tensorflow.python.util import deprecation_wrapper as deprecation
-#deprecation._PER_MODULE_WARNING_LIMIT = 0
-
-
 ###################################DEV_OPTIONS#############################################
 
 ############Performance options: data loading
-do_parallel = False #load data and preprocess it in parallel
-do_parallel_MAF = False #also do MAF calculation in parallel, otherwise use PLINK
+do_parallel = False #load data and preprocess it in parallel, not recommended, scikit is faster
 use_scikit_allel = True #use scikit-ellel to load the data, recommended, requires installation of skikit-allel package
 
 ############Performance options: masking
@@ -82,12 +49,14 @@ use_cuDF = False #TODO enable data loading directly in the GPU
 
 ############backup options and reporting options
 save_model = True #[True,False] save final model generated after all training epochs, generating a checkpoint that can be loaded and continued later
+save_activations = False #export activation values of the last hidden layer
 save_pred = False #[True,False] save predicted results for each training epoch and for k-fold CV
 resuming_step = 0 #number of first step if recovery mode True
 save_summaries = False #save summaries for plotting in tensorboard
 detailed_metrics = False #time consuming, calculate additional accuracy metrics for every variant and MAF threshold
 report_perf_by_rarity = False #report performance for common versus rare variants
 full_train_report = False #True: use full training set to report loss, accuracy, etc (a lot more VRAM needed) in the final result list, False: calculate average statistics per batch (less VRAM needed)
+
 #lower and upper thresholds for rare VS common variants analyses
 rare_threshold1 = 0
 rare_threshold2 = 0.01
@@ -95,22 +64,17 @@ common_threshold1 = 0.01
 common_threshold2 = 1
 
 ############Learning options
-categorical = "False" #False: treat variables as numeric allele count vectors [0,2], True: treat variables as categorical values (0,1,2)(Ref, Het., Alt)
 split_size = 100 #number of batches
 training_epochs = 35000 #learning epochs (if fixed masking = True) or learning permutations (if fixed_masking = False), default 35000, number of epochs or data augmentation permutations (in data augmentation mode when fixed_masking = False)
 #minimum training_epochs recommended for grid search training_epochs=499 (starts at 0)
 last_batch_validation = False #when k==1, you may use the last batch for valitation if you want
-alt_signal_only = False #TODO Wether to treat variables as alternative allele signal only, like Minimac4, estimating the alt dosage
 all_sparse=True #set all hidden layers as sparse
-custom_beta=False #if True, beta scaling factor is proportional to number of features
-average_loss=False #True/False use everage loss, otherwise total sum will be calculated
+average_loss=True #True/False use everage loss, otherwise total sum will be calculated
 disable_alpha=False #disable alpha for debugging only
-inverse_alpha=True #1/alpha, prioritize common variants
-freq_based_alpha=True #latest update, alpha is calculated based on the frequency of the least frequent class
-per_batch_alpha=False #alpha is calculated based on the frequency of the least frequent class per batch
+inverse_alpha=True #1/alpha
 early_stop_begin=1 #after what epoch to start monitoring the early stop criteria
 window=500 #stop criteria, threshold on how many epochs without improvement in average loss, if no improvent is observed, then interrupt training
-hysteresis=0.0001 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
+hysteresis=0.001 #stop criteria, improvement ratio, extra room in the threshold of loss value to detect improvement, used to identify the beggining of a performance plateau
 
 ############Masking options
 fixed_masking = False #True: mask variants only at the beggining of the training cycle, False: mask again with a different pattern after each iteration (data augmentation mode)
@@ -120,6 +84,7 @@ mask_preset = False #True: mask from genotype array
 shuffle = True #Whether shuffle data or not at the begining of training cycle. Not necessary for online data augmentation.
 repeat_cycles = 4 #how many times to repeat the masking rate
 validate_after_epoch=False #after each epoch, apply a new masking pattern, then calculate validation accuracy on the new unseen mask pattern
+validate_after_cycle=False
 calculate_r2_per_epoch=False
 calculate_acc_per_epoch=False
 
@@ -146,7 +111,7 @@ if(use_scikit_allel==True):
     else:
         print ("Using tabix at:", tabix_path)
 
-if(do_parallel_MAF == False):
+if(use_scikit_allel == False):
     plink_path = cmd_exists('plink')
     if(plink_path == False):
         print("WARNING!!! Plink not found, MAF calculation may crash!!!")
@@ -155,10 +120,9 @@ if(do_parallel_MAF == False):
 
 #global variables
 MAF_all_var = [] #MAF calculated only once for all variants,remove redundancies
-freq_all_var = []
+freq_all_var = [] #Frequency of the least frequent class for the encoded data
 rare_indexes = [] #indexes of rare variants
 common_indexes = [] #indexes of common variants
-MAF_all_var_vector = [] #vector of weights equal to number of output nodes (featuresX2 by default)
 ncores = multiprocessing.cpu_count() #for parallel processing
 config = tf.ConfigProto(log_device_placement=False)
 config.intra_op_parallelism_threads = 0 #0=auto
@@ -179,60 +143,19 @@ elif(par_mask_method == "thread"):
 elif(par_mask_method == "ray"):
     import ray
 
-def convert_gt_to_int(gt,alt_signal_only=False):
+def convert_gt_to_int(gt):
 
     genotype_to_int={'0/0': [1,0], '0|0': [1,0], '0/1': [1,1], '0|1':[1,1], '1/0':[1,1], '1|0':[1,1], '1/1':[0,1], '1|1':[0,1], './0':[0,0], './1':[0,0], './.':[0,0], '0/.':[0,0], '1/.':[0,0]}
     result=genotype_to_int[gt[0:3]]
 
-    if(alt_signal_only==True):
-        genotype_to_int={'0/0': 0, '0|0': 0.0, '0/1': 1, '0|1':1, '1/0':1, '1|0':1, '1/1':2, '1|1':2, './0':-1, './1':-1, './.':-1, '0/.':-1, '1/.':-1}
-    
     return result
 
 
-def process_lines(lines):
-
-    result_line=[]
-    pos=0
-    chr=0
-    start_pos='0'
-    first=True
-
-    snp_ids={}
-
-    processed_result=[]
-    
-    for line in lines:
-        #skip comments
-        if(line[0]=='#'):
-            continue
-        if(first==True):
-            chr, start_pos = line.split('\t')[0:2]
-            first=False
-
-        vcf_line=line.split('\t')
-        vcf_line[-1]=vcf_line[-1].replace('\n','')
-        for column in vcf_line[9:]:
-            result=convert_gt_to_int(column[0:3])
-            result_line.append(result)
-            
-        processed_result.append(result_line)
-        
-    return processed_result
-
-def convert_genotypes_to_int(indexes, file, categorical="False"):
+def convert_genotypes_to_int(indexes, file):
     if(verbose>0):
         print("process:", multiprocessing.current_process().name, "arguments:", indexes, ":", file)
     
     j=0
-    #command = "cut -f"
-    #for i in range(len(indexes)):
-    #    command = command + str(indexes[i]+1)
-    #    if(i<len(indexes)-1):
-    #        command = command + ","
-
-    #command = command + " " + file
-    #print(command)
 
     command = "cut -f " + str(indexes[0]) + "-" + str(indexes[len(indexes)-1]) + " " + file
 
@@ -253,15 +176,9 @@ def convert_genotypes_to_int(indexes, file, categorical="False"):
 
     df = list(map(list, zip(*df)))   
     
-    #print("BATCH SHAPE: ", len(df), len(df[0]))
-    #print(df[0])
     new_df = 0
-    if(categorical=="False"):
-        new_df = np.zeros((len(df),len(df[0]),2))
-        #new_df = np.zeros((df.shape[1]-9,len(df)*2))
-    else:
-        new_df = np.zeros((len(df),len(df[0])))
-    #print(type(df))
+    new_df = np.zeros((len(df),len(df[0]),2))
+
     i = 0 #RR column index
     j = 0 #RR row index
     idx = 0
@@ -270,8 +187,6 @@ def convert_genotypes_to_int(indexes, file, categorical="False"):
     if(loss_type=="CE" or loss_type=="WCE" or loss_type=="FL"):
         my_hom = 1
     
-    #print(len(df), df[0][0])
-    #print(len(df[0]))
     while i < len(df): #sample index, total-9 (9 for first comment columns)
         
         if(j==(len(df)-1)):
@@ -285,16 +200,7 @@ def convert_genotypes_to_int(indexes, file, categorical="False"):
             new_df[idx][j]=convert_gt_to_int(df[i][j][0:3])
             j += 1
         i += 1
-        #pbar.update(1)
         idx += 1
-
-    #print("processed_data")
-    #for i in range(10):
-    #    print(new_df[i][0])
-
-    #the data needs to be flattened because the matrix multiplication step (x*W) 
-    #doesn't support features with subfeatures (matrix of vectors)
-    #new_df = np.reshape(new_df, (new_df.shape[0],new_df.shape[1]*2))
 
     return new_df.tolist()
 
@@ -328,8 +234,8 @@ def run_epoch_worker(my_sess, X, Y, current_train_x, train_y, my_args, batch_siz
         print("current_train_x shape:", current_train_x.shape, flush=True)  
     my_result = []
     #for all batches, use current train_x current_train_y
-    current_train_y = flatten_data(my_sess, train_y)
-    current_train_x = flatten_data(my_sess, current_train_x)
+    current_train_y = flatten_data_np(train_y)
+    current_train_x = flatten_data_np(current_train_x)
     total_batch = int(current_train_x.shape[0] / batch_size)
     if(verbose>0):
         print("current_train_x shape after flatten:", current_train_x.shape, flush=True)    
@@ -353,7 +259,7 @@ def run_epoch_worker(my_sess, X, Y, current_train_x, train_y, my_args, batch_siz
 
     return my_result
 
-def submit_mask_tasks(my_data, mask_rate, categorical):
+def submit_mask_tasks(my_data, mask_rate):
     
     par_tasks = 1
     if(do_parallel_numpy_per_cycle==True):
@@ -364,7 +270,7 @@ def submit_mask_tasks(my_data, mask_rate, categorical):
 
     result = []
     for i in range(par_tasks):
-        result.append(pool.apply_async(partial(mask_data_per_sample_parallel, mydata=np.copy(my_data), mask_rate=mask_rate, categorical=categorical),[i]))
+        result.append(pool.apply_async(partial(mask_data_per_sample_parallel, mydata=np.copy(my_data), mask_rate=mask_rate),[i]))
     
     if(verbose>0):
         print("Runnning mask process, submitted.",flush=True)
@@ -372,28 +278,23 @@ def submit_mask_tasks(my_data, mask_rate, categorical):
     return result, pool
 
 def retrieve_cycle_results(m_result, pool):
-    
+
     results = []
-    
     pool.close()
     pool.join()
-    
     for thread in m_result:
         results.append(thread.get())
-        
+
     return results
 
-def run_parallel_gd_and_mask(sess, X, Y, current_train_x, my_data, mask_rate, categorical, my_args, batch_size):
-   
-    m_result, pool = submit_mask_tasks(my_data, mask_rate, categorical)
-        
+def run_parallel_gd_and_mask(sess, X, Y, current_train_x, my_data, mask_rate, my_args, batch_size):
+
+    m_result, pool = submit_mask_tasks(my_data, mask_rate)
     gd_result = run_epoch_worker(sess, X,Y,current_train_x, my_data, my_args, batch_size)
-        
     results = retrieve_cycle_results(m_result,pool)
-    
     if(verbose>0):
         print("gd and mask in parallel done. Result shape:", len(gd_result), len(gd_result[0]),flush=True)
-        
+
     return results, gd_result
 
 #parse initial_masking_rate if fraction is provided
@@ -422,14 +323,13 @@ def convert_to_float(frac_str):
         return float(leading) + sign_mult * (float(num) / float(denom))
 
 
-def process_data(file, categorical="False"):
-    
+def process_data(file):
+
     #Header and column names start with hashtag, skip those
     ncols = pd.read_csv(file, sep='\t', comment='#',header=None, nrows=1)    
     ncols = ncols.shape[1]
     
     print("Processing input data.")
-    print("categorical: ", categorical)
     print("use_scikit_allel: ", use_scikit_allel)
 
     n_samples = ncols-9
@@ -440,11 +340,18 @@ def process_data(file, categorical="False"):
     indexes = list(range(10,ncols+1)) #bash cut index is 1-based
     
     start = timeit.default_timer()
-    
+
+    #STRING_FROM_VCF -> DOSAGE -> PRESENCE_ENCODING
+    #'0/0'           -> 0      -> [1,0]  (ref is present, alt is absent)
+    #'1/0' or '0/1'  -> 1      -> [1,1]  (ref is present, alt is present)
+    #'1/1'           -> 2      -> [0,1]  (ref is absent, alt is present)
+    global MAF_all_var
+
     if(use_scikit_allel==True):
         callset = allel.read_vcf(file, tabix=tabix_path)
         my_GT = callset['calldata/GT']
         my_GT = allel.GenotypeArray(my_GT,dtype='i1')
+        ac = my_GT.count_alleles()
         my_GT = my_GT.to_n_alt(fill=-1)
         my_GT = my_GT.T
         ds_to_allel_presence_prob = {0:[1,0], 1:[1,1], 2:[0,1], -1: [0,0]}
@@ -452,8 +359,13 @@ def process_data(file, categorical="False"):
         for old, new in ds_to_allel_presence_prob.items():
             results[my_GT == old] = new
 
+        #REF,ALT frequecnies
+        MAF_all_var = ac.to_frequencies()
+        #ALT only frequecnies
+        MAF_all_var = np.round(MAF_all_var[:,1],6)
+
     elif(do_parallel==False):
-        results = convert_genotypes_to_int(indexes, file, categorical)
+        results = convert_genotypes_to_int(indexes, file)
         print( len(results), len(results[0]), len(results[0][0]))
 
     else:
@@ -461,17 +373,13 @@ def process_data(file, categorical="False"):
 
         pool = multiprocessing.Pool(ncores)
 
-        results = pool.map(partial(convert_genotypes_to_int, file=file, categorical=categorical),chunks)
+        results = pool.map(partial(convert_genotypes_to_int, file=file),chunks)
       
         pool.close()
         pool.join()
-                        
+
         print(len(results), len(results[0]), len(results[0][0]) , len(results[0][0][0]))
     
-        #for i in range(len(results)):
-        #    print(len(results[i]))
-    
-        #merge outputs from all processes, reshaping nested list
         results = [item for sublist in results for item in sublist]
 
     print(len(results), len(results[0]), len(results[0][0]) )
@@ -487,57 +395,31 @@ def process_data(file, categorical="False"):
     
     start_time = timeit.default_timer()
 
-    if(freq_based_alpha == True):
-        global freq_all_var
-        y_true = np.copy(results)
-        y_true = flatten_data_np(y_true)
-        freq1 = np.mean(y_true, 0) #frequency of ones along columns (axis 0, per variable)
-        freq0 = np.mean(np.subtract(1.0, y_true),0) #frequency of zeros along columns (axis 0, per variable)
-        freq01 = np.stack([freq0, freq1], 0) #stack M frequencies generated, resulting into a 2xM array
-        freq_all_var = np.amin(freq01, 0) #return smallest value per colum
-        if(inverse_alpha == True):
-            #freq_all_var = np.subtract(1.0,freq_all_var)
-            freq_all_var = np.mean(y_true, 0) #frequency of ones along columns (axis 0, per variable)
-            freq_all_var = np.divide(1.0,freq_all_var)
-        else:
-            freq_all_var = np.add(1.0,freq_all_var)
+    #calculates frequencies of least frequence class for using as alpha later
+    global freq_all_var
+    y_true = np.copy(results)
+    y_true = flatten_data_np(y_true)
+    freq1 = np.mean(y_true, 0) #frequency of ones along columns (axis 0, per variable)
+    freq0 = np.mean(np.subtract(1.0, y_true),0) #frequency of zeros along columns (axis 0, per variable)
+    freq01 = np.stack([freq0, freq1], 0) #stack M frequencies generated, resulting into a 2xM array
+    freq_all_var = np.amin(freq01, 0) #return smallest value per colum
+    #avoid div by zero
+    freq_all_var = np.clip(freq_all_var,0.01,1)
 
-    global MAF_all_var
-    
-    if(do_parallel_MAF == False):
+    if(inverse_alpha == True):
+        freq_all_var = np.divide(1.0,freq_all_var)
 
-        #MAF_all_var = calculate_MAF_global(indexes, results, categorical)
+    freq_all_var = np.round(freq_all_var,6)
+
+    if(use_scikit_allel == False):
+
         MAF_all_var = calculate_ref_MAF(file)
-
-    else:
-        chunks = chunk(indexes,ncores)
-
-        pool = multiprocessing.Pool(ncores)
-
-        MAF_all_var = pool.map(partial(calculate_MAF_global, inx=results, categorical=categorical),chunks)
-
-        pool.close()
-        pool.join()
-
-        #merge outputs from all processes, reshaping nested list
-        MAF_all_var = [item for sublist in MAF_all_var for item in sublist]
-
-    global MAF_all_var_vector
-    MAF_all_var_vector = []
 
     #create list of variants that belong to output layer, 1 index per variant
     keep_indexes=list(range(left_buffer,len(MAF_all_var)-right_buffer))
     
     #find out the layer structure (either 2 or 3 features per variant)
     n=2
-    if(categorical==True):
-        n=3
-
-    for i in keep_indexes:
-        MAF_all_var_vector.append(MAF_all_var[i])
-        MAF_all_var_vector.append(MAF_all_var[i])
-        if(categorical==True):
-            MAF_all_var_vector.append(MAF_all_var[i])
 
     #set start and end index of output layer
     start = 0
@@ -552,8 +434,8 @@ def process_data(file, categorical="False"):
     global common_indexes
 
     #generate list of indexes of variants that are rare and common
-    rare_indexes = filter_by_MAF_global(results, MAF_all_var, threshold1=rare_threshold1, threshold2=rare_threshold2, categorical=categorical)    
-    common_indexes = filter_by_MAF_global(results, MAF_all_var, threshold1=common_threshold1, threshold2=common_threshold2, categorical=categorical)
+    rare_indexes = filter_by_MAF_global(results, MAF_all_var, threshold1=rare_threshold1, threshold2=rare_threshold2)    
+    common_indexes = filter_by_MAF_global(results, MAF_all_var, threshold1=common_threshold1, threshold2=common_threshold2)
     
     #map output layer indexes to the indexes of common/rare variants, generating intersection
     rare_intersect = [val for val in keep_indexes_vector if val in rare_indexes]
@@ -572,13 +454,12 @@ def process_data(file, categorical="False"):
 
     print("ALLELE FREQUENCIES", MAF_all_var)
     print("LENGTH1", len(MAF_all_var)) 
-    print("LENGTH2", len(MAF_all_var_vector)) 
     stop_time = timeit.default_timer()
     print('Time to calculate MAF (sec): ', stop_time - start_time)
 
     return results
 
-def filter_by_MAF_global(x, MAFs, threshold1=0, threshold2=1, categorical=False):
+def filter_by_MAF_global(x, MAFs, threshold1=0, threshold2=1):
     
     #don't do any filtering if the thresholds are 0 and 1
     if(threshold1==0 and threshold2==1):
@@ -586,20 +467,13 @@ def filter_by_MAF_global(x, MAFs, threshold1=0, threshold2=1, categorical=False)
 
     indexes_to_keep = []
     i = 0
-    j = 0
-    k = 0   
+    k = 0
     
     while i < len(MAFs):
         if(MAFs[i]>threshold1 and MAFs[i]<=threshold2):
-            if(categorical==True or categorical=="True"):
-                indexes_to_keep.append(j)
-                indexes_to_keep.append(j+1)
-                indexes_to_keep.append(j+2)
-            elif(categorical==False or categorical=="False"):
-                indexes_to_keep.append(k)
-                indexes_to_keep.append(k+1)            
+            indexes_to_keep.append(k)
+            indexes_to_keep.append(k+1)
         i += 1
-        j += 3
         k += 2
         
     return indexes_to_keep
@@ -630,18 +504,19 @@ def calculate_ref_MAF(refname):
 
     return MAF_all_var
 
-def mask_data_per_sample_parallel(i,mydata, mask_rate=0.9, categorical="False"):
+def run_custom_cmd():
+    #bash *VMV.2_val.sh
+    result = sp.check_output(custom_cmd, encoding='UTF-8', shell=True)
+
+    return result
+
+def mask_data_per_sample_parallel(i,mydata, mask_rate=0.9):
 
     if(verbose>0):
         print("Data to mask shape:", mydata.shape, flush=False)
         
     nmask = int(round(len(mydata[0])*mask_rate))
     my_mask=[0,0]
-
-    if(categorical=="True"):
-        my_mask=-1
-    elif(alt_signal_only==True):
-        my_mask=0
 
     def chunks(l, n):
         for i in range(0, len(l), n):
@@ -714,9 +589,6 @@ def mask_data_per_sample_parallel(i,mydata, mask_rate=0.9, categorical="False"):
             mydata = np.array(result)
             
         elif(par_mask_method=="ray"):
-            #a little slower if you restart ray every time
-            #ray.shutdown()
-            #ray.init()
             @ray.remote
             def mask_worker(data):
                 n=len(data)
@@ -732,8 +604,6 @@ def mask_data_per_sample_parallel(i,mydata, mask_rate=0.9, categorical="False"):
             result = ray.get(futures)
             result = np.array(result)
             mydata = result
-            #ray.shutdown()
-            
         else:
             m=len(mydata[0])
             if(mask_per_sample==False):
@@ -769,68 +639,38 @@ def variable_summaries(var):
         tf.summary.scalar('min', tf.reduce_min(var))
         tf.summary.histogram('histogram', var)
 
-def logfunc(x, x2):
-    x = tf.cast(x, tf_precision)
-    x2 = tf.cast(x2, tf_precision)
-    
-    cx = tf.clip_by_value(x, eps, one)
-    cx2 = tf.clip_by_value(x2, eps, one)
-    return tf.multiply( x, tf.log(tf.div(cx,cx2)))
+def calculate_rho_hat(activations, act_val):
 
+    rho_hat = tf.reduce_mean(activations,0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
+
+    if(act_val.startswith("tanh") or act_val.startswith("relu") or act_val.startswith("softplus")):
+        rho_hat = tf.add(rho_hat,tf.abs(tf.reduce_min(rho_hat))) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
+        rho_hat = tf.div(rho_hat,tf.reduce_max(rho_hat)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
+
+    #avoid nan
+    rho_hat = tf.clip_by_value(rho_hat, eps, one-eps)
+    return rho_hat
 
 #Kullback-Leibler divergence equation (KL divergence)
 #The result of this equation is added to the loss function result as an additional penalty to the loss based on sparsity
 def KL_Div(rho, rho_hat):
-
-    rho = tf.cast(rho, tf_precision)
-    rho_hat = tf.cast(rho_hat, tf_precision)
-
-    KL_loss = rho * logfunc(rho, rho_hat) + (1 - rho) * logfunc((1 - rho), (1 - rho_hat))
-    
-    #rescaling KL result to 0-1 range
-    return tf.div(KL_loss-tf.reduce_min(KL_loss)+1e-10,tf.reduce_max(KL_loss)-tf.reduce_min(KL_loss))
-
     #RR I just simplified the KL divergence equation according to the book:
     #RR "Hands-On Machine Learning with Scikit-Learn and TensorFlow" by Aurélien Géron
     #RR Example source code here https://github.com/zhiweiuu/sparse-autoencoder-tensorflow/blob/master/SparseAutoEncoder.py
     #RR KL2 is the classic sparsity implementation, source reference: https://github.com/elykcoldster/sparse_autoencoder/blob/master/mnist_sae.py
     #https://web.stanford.edu/class/cs294a/sparseAutoencoder_2011new.pdf
-def pearson_r_loss(y_true, y_pred):
-    
-    pearson_r, update_op = tf.contrib.metrics.streaming_pearson_correlation(y_pred, y_true, name='pearson_r')
-    # find all variables created for this metric
-    metric_vars = [i for i in tf.local_variables() if 'pearson_r'  in i.name.split('/')]
+    #default suggested beta and rho for denoising sparse AE: 0.1, 0.01: https://github.com/jbregli/Stacked_auto_encoders/blob/master/CPU_version/AutoEncoder.py
+    rho = tf.cast(rho, tf_precision)
+    rho_hat = tf.cast(rho_hat, tf_precision)
 
-    # Add metric variables to GLOBAL_VARIABLES collection.
-    # They will be initialized for new session.
-    for v in metric_vars:
-        tf.add_to_collection(tf.GraphKeys.GLOBAL_VARIABLES, v)
+    #https://gist.github.com/morphogencc/c4141ec923310d71e2ea62f5ee227f95
+    KL_loss = rho * tf.log(rho) - rho * tf.log(rho_hat) + (1 - rho) * tf.log(1 - rho) - (1 - rho) * tf.log(1 - rho_hat)
+    if(average_loss==True):
+        KL_loss = tf.reduce_mean(KL_loss)
+    else:
+        KL_loss = tf.reduce_sum(KL_loss)
 
-    # force to update metric values
-    with tf.control_dependencies([update_op]):
-        pearson_r = tf.identity(pearson_r)
-        pearson_r = tf.square(pearson_r)
-        rloss = tf.subtract(1.0, pearson_r, name='reconstruction_loss')
-        #return 1-pearson_r**2
-        return rloss
-
-def weighted_MSE(y_pred, y_true):
-    MSE_per_var = tf.reduce_mean(tf.square(tf.subtract(y_true,y_pred)), axis=0)
-    
-    #The condition tensor acts as a mask that chooses, based on the value at each element, whether the corresponding element / row in the output should be taken from x (if true) or y (if false).
-    #cond_shape = y_true.get_shape()
-    #x = tf.ones(cond_shape)
-    #y = tf.zeros(cond_shape)
-    
-    #tf.where(tf.equal(0,tf.round(y_true)), x, y)       
-    #mean(((1.5-MAF)^5)*MSE)
-    weights = tf.subtract(1.5, MAF_all_var_vector)
-    weights = tf.pow(weights, gamma)
-    weighted_MSE_per_var = tf.multiply(MSE_per_var, weights)
-     
-    weighted_MSE_loss = tf.reduce_mean(weighted_MSE_per_var, name='reconstruction_loss')
-    return weighted_MSE_loss
-
+    return KL_loss
 
 def calculate_pt(y_pred, y_true):
 
@@ -841,7 +681,6 @@ def calculate_pt(y_pred, y_true):
 
     #ref:https://github.com/unsky/focal-loss/blob/master/focal_loss.py
     pt_1 = tf.clip_by_value(pt_1, eps, one) #avoid log(0) that returns inf
-    #pt_1 = tf.add(pt_1, 1e-8) #avoid log(0) that returns inf
 
     #if value is zero in y_true, than take value from y_pred, otherwise, write zeros
     pt_0 = tf.where(tf.equal(y_true, 0), y_pred, tf.zeros_like(y_pred))
@@ -866,49 +705,23 @@ def cross_entropy(y_pred, y_true):
 
     CE_0, CE_1 =  calculate_CE(y_pred, y_true)
 
-    CE_1 = tf.reduce_sum(CE_1)
-    CE_0 = tf.reduce_sum(CE_0)
+    CE = tf.add(CE_1, CE_0)
 
-    if(average_loss==True):
-        CE = tf.divide(tf.add(CE_1, CE_0), len(y_true)*len(y_true[0]), name='reconstruction_loss')
+    if(average_loss==True and loss_type=='CE'):
+        CE = tf.reduce_mean(CE, name='reconstruction_loss')
     else:
-        CE = tf.add(CE_1, CE_0, name='reconstruction_loss')
+        CE = tf.reduce_sum(CE, name='reconstruction_loss')
 
     return CE
 
 def calculate_alpha(y_true):
 
-    #return the frequency of the least frequent class per variable
-    if(per_batch_alpha==True):
-        freq1 = tf.reduce_mean(y_true, 0) #frequency of ones along columns (axis 0, per variable)
-        freq0 = tf.reduce_mean(tf.subtract(1.0, y_true),0) #frequency of zeros along columns (axis 0, per variable)
-        freq01 = tf.stack([freq0, freq1], 0) #stack M frequencies generated, resulting into a 2xM tensor
-        alpha = tf.reduce_min(freq01, 0) #return smallest value per colum
-        alpha = tf.add(1.0, freq01) #return smallest value per colum
-        alpha = tf.cast(alpha, tf_precision)
-        return alpha, alpha
-    elif(freq_based_alpha==True):
-        alpha = freq_all_var
-        alpha = tf.cast(alpha, tf_precision)
-        return alpha, alpha
+    alpha = tf.cast(freq_all_var, tf_precision)
 
-    one_eps=tf.cast(1.0-1e-6, tf_precision)
-
-    alpha = tf.multiply(tf.cast(MAF_all_var_vector,tf_precision),2.0)
-    alpha = tf.clip_by_value(alpha, eps, one_eps)
-
-    if(inverse_alpha==True):
-        alpha_1 = tf.divide(one, alpha)
-        alpha_0 = tf.divide(one, tf.subtract(one,alpha))
-    else:
-        alpha_1 = alpha
-        alpha_0 = tf.subtract(one,alpha)
-        
-    return alpha_0, alpha_1
+    #keep alpha returning duplicated in case we want to do any specific transformation
+    return alpha, alpha
 
 def weighted_cross_entropy(y_pred, y_true):
-
-    #pt_0, pt_1 = calculate_pt(y_pred, y_true)
 
     CE_0, CE_1 =  calculate_CE(y_pred, y_true)
 
@@ -920,8 +733,8 @@ def weighted_cross_entropy(y_pred, y_true):
     WCE_1 = tf.reduce_sum(WCE_per_var_1)
     WCE_0 = tf.reduce_sum(WCE_per_var_0)
 
-    if(average_loss==True):
-        WCE = tf.divide(tf.add(WCE_1, WCE_0), len(y_true)*len(y_true[0]), name='reconstruction_loss')
+    if(average_loss==True and loss_type=='CE'):
+        WCE = tf.reduce_mean(tf.add(WCE_1, WCE_0), axis=0, name='reconstruction_loss')
     else:
         WCE = tf.add(WCE_1, WCE_0, name='reconstruction_loss')
 
@@ -932,20 +745,9 @@ def calculate_gamma(y_pred, y_true, my_gamma):
 
     pt_0, pt_1 = calculate_pt(y_pred, y_true)
 
-    #if statement to avoid useless calculaions
-    if(gamma == 0):
-        gamma_0 = one
-        gamma_1 = one
-    elif(gamma == 1):
-        gamma_0 = pt_0
-        gamma_1 = tf.subtract(one, pt_1)
-    elif(gamma == 0.5):
-        gamma_0 = tf.sqrt(pt_0)
-        gamma_1 = tf.sqrt(tf.subtract(one, pt_1))
-    else:
-        gamma_0 = tf.pow(pt_0, my_gamma)
-        gamma_1 = tf.pow(tf.subtract(one, pt_1), my_gamma)
-    
+    gamma_0 = tf.pow(pt_0, my_gamma)
+    gamma_1 = tf.pow(tf.subtract(one, pt_1), my_gamma)
+
     return gamma_0, gamma_1
 
 #ref: https://towardsdatascience.com/handling-imbalanced-datasets-in-deep-learning-f48407a0e758
@@ -960,7 +762,6 @@ def focal_loss(y_pred, y_true):
     FL_per_var_1_r = CE_1[:,0::2]
     FL_per_var_0_r = CE_0[:,0::2]
 
-    #my_gamma=tf.cast(gamma, tf_precision, name="gamma")
     my_gamma=tf.Variable(gamma, name="gamma")
     tf.add_to_collection('gamma', my_gamma)
 
@@ -976,27 +777,21 @@ def focal_loss(y_pred, y_true):
     FL_per_var_1_r = tf.multiply(gamma_1, FL_per_var_1_r)
     FL_per_var_0_r = tf.multiply(gamma_0, FL_per_var_0_r)
 
+    FL_per_var_r = tf.add(FL_per_var_0_r, FL_per_var_1_r)
+    FL_per_var_a = tf.add(FL_per_var_0_a, FL_per_var_1_a)
 
     if(disable_alpha==False):
         #extract and reweight alternative allele
-        FL_per_var_1_a = tf.multiply(FL_per_var_1_a, alpha_1[1::2])
-        FL_per_var_0_a = tf.multiply(FL_per_var_0_a, alpha_0[1::2])
+        FL_per_var_a = tf.multiply(FL_per_var_a, alpha_1[1::2])
         #extract and reweight reference allele
-        FL_per_var_1_r = tf.multiply(FL_per_var_1_r, alpha_1[0::2])
-        FL_per_var_0_r = tf.multiply(FL_per_var_0_r, alpha_0[0::2])
- 
-    FL_1_a = tf.reduce_sum(FL_per_var_1_a)
-    FL_0_a = tf.reduce_sum(FL_per_var_0_a)
-    FL_1_r = tf.reduce_sum(FL_per_var_1_r)
-    FL_0_r = tf.reduce_sum(FL_per_var_0_r)
+        FL_per_var_r = tf.multiply(FL_per_var_r, alpha_1[0::2])
 
-    FL_1 = tf.add(FL_1_a, FL_0_a)
-    FL_0 = tf.add(FL_1_r, FL_0_r)
+    FL = tf.concat([FL_per_var_r,FL_per_var_a], 1)
 
     if(average_loss==True):
-        FL = tf.divide(tf.add(FL_1, FL_0), tf.multiply(y_pred.get_shape()[0],y_pred.get_shape()[1]) , name='reconstruction_loss')
+        FL = tf.reduce_mean(FL,  name='reconstruction_loss')
     else:
-        FL = tf.add(FL_1, FL_0, name='reconstruction_loss')
+        FL = tf.reduce_sum(FL, name='reconstruction_loss')
 
     return FL
 
@@ -1024,7 +819,6 @@ def f1_score(y_pred, y_true, sess):
         
         precision = tf.divide(TP, tf.add(TP, FP))
         recall = tf.divide(TP, tf.add(TP, FN))
-        #f1 = tf.multiply(two, tf.multiply(precision, tf.divide(recall, tf.add(precision, recall))))
         top = tf.multiply(precision, recall)
         bottom = tf.add(precision, recall)
         f1 = tf.multiply(two, tf.divide(top,bottom))
@@ -1127,8 +921,8 @@ def encoder(x, func, l1_val, l2_val, weights, biases, units_num, keep_rate): #RR
     #dropout
     if keep_rate != 1: ##RR added dropout
             x = dropout(x, 'x', keep_rate) ##RR added dropout
-              
-    if func == 'sigmoid':
+
+    if(func.startswith('sigmoid')):
         print('Encoder Activation function: sigmoid')
         
         #tf.nn.sigmoid computes sigmoid of x element-wise.
@@ -1137,33 +931,30 @@ def encoder(x, func, l1_val, l2_val, weights, biases, units_num, keep_rate): #RR
         #tf.matmul Multiplies matrix a by matrix b, producing a * b
         #If one or both of the matrices contain a lot of zeros, a more efficient multiplication algorithm can be used by setting the corresponding a_is_sparse or b_is_sparse flag to True. These are False by default.
         #tf.add will sum the result from tf.matmul (input*weights) to the biases
-        #layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['encoder_h1']), biases['encoder_b1']))
-        #with tf.device("/gpu:1"):
         layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['encoder_h1']), biases['encoder_b1']))
 
-        #This layer implements the operation: 
-        #outputs = activation(inputs * weights + bias) 
-        #where activation is the activation function passed as the activation argument, defined inprevious line
-        #The function is applied after the linear transformation of inputs, not W*activation(inputs)
-        #Otherwise the function would not allow nonlinearities
-        layer_1 = tf.layers.dense(layer_1, units=units_num, kernel_regularizer= regularizer)
-                       
-    elif func == 'tanh':
+    elif(func.startswith('tanh')):
         print('Encoder Activation function: tanh')
-        #with tf.device("/gpu:1"):
         layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['encoder_h1']), biases['encoder_b1']))
-        layer_1 = tf.layers.dense(layer_1, units=units_num, kernel_regularizer= regularizer)
-        #layer_1 = tf.layers.dense(layer_1, units=221, kernel_regularizer= regularizer)
-    
-    elif(func == 'relu' or func == 'relu,sigmoid' or func == 'relu,tanh' or func == 'relu_sigmoid' or func == 'relu_tanh'):
+
+    elif(func.startswith('relu')):
         print('Encoder Activation function: relu')
-        #with tf.device("/gpu:1"):
         layer_1 = tf.nn.relu(tf.add(tf.matmul(x, weights['encoder_h1']),biases['encoder_b1']))
-        layer_1 = tf.layers.dense(layer_1, units=units_num, kernel_regularizer= regularizer)
-        #layer_1 = tf.layers.dense(layer_1, units=221, kernel_regularizer= regularizer)
+
+    elif(func.startswith('softplus')):
+        print('Encoder Activation function: softplus')
+        layer_1 = tf.nn.softplus(tf.add(tf.matmul(x, weights['encoder_h1']), biases['encoder_b1']))
+
+    #This layer implements the operation: 
+    #outputs = activation(inputs * weights + bias) 
+    #where activation is the activation function passed as the activation argument, defined inprevious line
+    #The function is applied after the linear transformation of inputs, not W*activation(inputs)
+    #Otherwise the function would not allow nonlinearities
+    layer_1 = tf.layers.dense(layer_1, units=units_num, kernel_regularizer= regularizer)
+
 
     return layer_1
-        
+
 def decoder(x, func, weights, biases):
     
     x = tf.cast(x, tf_precision)
@@ -1173,439 +964,54 @@ def decoder(x, func, weights, biases):
     else:
         entropy_loss = False
         
-    if(func == 'sigmoid' or func == 'relu,sigmoid' or func == 'relu_sigmoid'):
+    if(func.endswith('sigmoid')):
         print('Decoder Activation function: sigmoid')
-        layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1']))
-        #rescaling, if dealing with categorical variables or factors, tf.reduce_max(x) will result in 1
-        if(entropy_loss==False):
-            layer_1 = tf.multiply(layer_1, tf.reduce_max(x), name="y_pred")
-        #layer_1 = tf.round(layer_1)
-        #layer_1 = tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1'])
+        layer_1 = tf.nn.sigmoid(tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1']), name="y_pred")
 
-    elif(func == 'tanh' or func == 'relu,tanh' or func == 'relu_tanh'):
+    elif(func.endswith('tanh')):
         print('Decoder Activation function: tanh')
         layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1']))
-        #rescaling, if dealing with categorical variables or factors, tf.reduce_max(x) will result in 1
-        if(entropy_loss==False):
-            layer_1 = tf.div(tf.multiply(tf.add(layer_1, 1), tf.reduce_max(x)), 2, name="y_pred")
-        else:
-            layer_1 = tf.div(tf.add(layer_1, 1), 2, name="y_pred")
-        #layer_1 = tf.round(layer_1)
-        #layer_1 = tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1'])
 
-    elif func == 'relu':
+    elif(func.endswith('relu')):
         print('Decoder Activation function: relu')
-        layer_1 = tf.nn.relu(tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1']), name="y_pred")
-        #no rescaling needed
-        #layer_1 = tf.round(layer_1)
-        #layer_1 = tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1'])
+        layer_1 = tf.nn.relu(tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1']))
+
+    elif(func.endswith('softplus')):
+        print('Decoder Activation function: softplus')
+        layer_1 = tf.nn.softplus(tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1']))
+
+    elif(func.endswith('none')):
+        print('Decoder Activation function: none')
+        layer_1 = tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1'], name="y_pred")
+
+    if(func.endswith("tanh") or func.endswith("relu") or func.endswith("softplus")):
+        layer_1 = tf.add(layer_1,tf.abs(tf.reduce_min(layer_1))) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
+        layer_1 = tf.div(layer_1,tf.reduce_max(layer_1), name="y_pred") # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
+        #layer_1 = tf.add(layer_1,1.0)
+        #layer_1 = tf.div(layer_1,2.0, name="y_pred")
 
     return layer_1
 
 
-def mean_empirical_r2(x,y, categorical=False):
+def mean_empirical_r2(x,y):
     #This calculates exactly the same r2 as the empirical r2hat from minimac3 and minimac4
     #The estimated r2hat is different
     j=0
     mean_correl = 0
     correls = []
     while j < len(y[0]):
-        if(categorical==False):
-            getter = operator.itemgetter([j+1])
-            x_genotypes = list(map(list, map(getter, np.copy(x))))
-            y_genotypes = list(map(list, map(getter, np.copy(y))))
-            x_genotypes = list(np.array(x_genotypes).flat)
-            y_genotypes = list(np.array(y_genotypes).flat)
-            #print("GGGGGG")
-            #print(x_genotypes)
-            #print(y_genotypes)
-            correl = linregress(x_genotypes, y_genotypes)[2]
-            mean_correl += correl/len(y[0])
-            j+=2
-        else:
-            x_genotypes = []
-            y_genotypes = []
-            for i in range(len(y)):
-                x_genotypes.append(np.argmax(x[i][j:j+3]))                
-                y_genotypes.append(np.argmax(y[i][j:j+3]))
-            
-            correl = linregress(x_genotypes, y_genotypes)[2]
-            mean_correl += correl/len(y[0])
-            j+=3
+        getter = operator.itemgetter([j+1])
+        x_genotypes = list(map(list, map(getter, np.copy(x))))
+        y_genotypes = list(map(list, map(getter, np.copy(y))))
+        x_genotypes = list(np.array(x_genotypes).flat)
+        y_genotypes = list(np.array(y_genotypes).flat)
+        correl = linregress(x_genotypes, y_genotypes)[2]
+        mean_correl += correl/len(y[0])
+        j+=2
         correls.append(mean_correl)
-        #print("mean_correl",mean_correl)
     return mean_correl, correls
 
-def calculate_MAF(x, categorical=False):
-    j=0
-    MAF_list = []
-    if(categorical==True):
-        while j < (len(x[0])-2):
-            ref = 0
-            alt = 0
-            MAF = 0        
-            for i in range(len(x)):
-                allele_index = np.argmax(x[i][j:j+3])
-                if(allele_index == 0):
-                    ref+=2
-                elif(allele_index == 1):
-                    ref+=1
-                    alt+=1
-                elif(allele_index == 2):
-                    alt+=2
-            if(alt<=ref):
-                MAF=alt/(ref+alt)
-                #major=ref/len(y)
-            else:
-                MAF=ref/(ref+alt)
-                #major=alt/len(y)
-                #print(MAF)
-            MAF_list.append(MAF)    
-            j+=3           
-    elif(categorical==False):
-        if(loss_type=="CE" or loss_type=="WCE" or loss_type=="FL"):
-            while j < (len(x[0])-1):
-                ref = 0
-                alt = 0
-                MAF = 0       
-                for i in range(len(x)):                   
-                    ref+=x[i][j]
-                    alt+=x[i][j+1]
-                    if(x[i][j] != x[i][j+1]):
-                        ref+=x[i][j]                     
-                        alt+=x[i][j+1]                       
-                if(alt<=ref):
-                    MAF=alt/(ref+alt)
-                    #major=ref/len(y)
-                else:
-                    MAF=ref/(ref+alt)
-                MAF_list.append(MAF)    
-                j+=2
-        else:
-            while j < (len(x[0])-1):
-                ref = 0
-                alt = 0
-                MAF = 0       
-                for i in range(len(x)):
-                    ref+=x[i][j]
-                    alt+=x[i][j+1]   
-                if(alt<=ref):
-                    MAF=alt/(ref+alt)
-                    #major=ref/len(y)
-                else:
-                    MAF=ref/(ref+alt)
-                MAF_list.append(MAF)    
-                j+=2
-    return MAF_list
-
-def calculate_MAF_global_GPU(indexes, inx, categorical="False"):
-    
-
-    j=0
-    if(do_parallel_MAF==True):
-        getter = operator.itemgetter(indexes)
-        x = list(map(list, map(getter, np.copy(inx))))
-    else:
-        x = inx
-    MAF_list = []
-        
-    #tf.reset_default_graph()
-    with tf.compat.v1.Session() as sess:
-    #with tf.Session(config=config) as sess:        
-       
-        #print("LENGTH", len(x[0]))
-        if(categorical=="True"):
-            while j < (len(x[0])):
-                ref = 0
-                alt = 0
-                MAF = 0        
-                for i in range(len(x)):
-                    if(x[i][j] == 0):
-                        ref = sess.run(tf.add(ref,2))
-                    elif(x[i][j] == 1):
-                        ref = sess.run(tf.add(ref,1))
-                        alt = sess.run(tf.add(alt,1))
-                    elif(x[i][j] == 2):
-                        alt = sess.run(tf.add(alt,2))
-                if(alt<=ref):
-                    MAF=sess.run(tf.div(alt,tf.add(ref,alt)))
-                    #major=ref/len(y)
-                else:
-                    MAF=sess.run(tf.div(ref,tf.add(ref,alt)))
-                    #major=alt/len(y)
-                    #print(MAF)
-                MAF_list.append(MAF)
-                j+=1          
-        elif(categorical=="False"):
-            if(loss_type=="CE" or loss_type=="WCE" or loss_type=="FL"):
-                while j < (len(x[0])):
-                    ref = 0
-                    alt = 0
-                    MAF = 0        
-                    for i in range(len(x)):
-                        ref = sess.run(tf.add(ref,x[i][j][0]))
-                        alt = sess.run(tf.add(alt,x[i][j][1])) 
-                        if(x[i][j][0]!=x[i][j][1]):
-                            ref = sess.run(tf.add(ref,x[i][j][0]))
-                            alt = sess.run(tf.add(alt,x[i][j][1]))
-                    if(alt<=ref):
-                        MAF=sess.run(tf.div(alt,tf.add(ref,alt)))
-                        #major=ref/len(y)
-                    else:
-                        MAF=sess.run(tf.div(ref,tf.add(ref,alt)))
-                    MAF_list.append(MAF)    
-                    j+=1            
-            else:    
-                while j < (len(x[0])):
-                    ref = 0
-                    alt = 0
-                    MAF = 0        
-                    for i in range(len(x)):
-                        ref = sess.run(tf.add(ref,x[i][j][0]))
-                        alt = sess.run(tf.add(alt,x[i][j][1]))  
-                    if(alt<=ref):
-                        MAF=sess.run(tf.div(alt,tf.add(ref,alt)))
-                        #major=ref/len(y)
-                    else:
-                        MAF=sess.run(tf.div(ref,tf.add(ref,alt)))
-                    MAF_list.append(MAF)    
-                    j+=1
-    
-    #reset tensorflow session
-    #tf.reset_default_graph()
-    sess.close()
-    return MAF_list
-
-def calculate_MAF_global(indexes, inx, categorical="False"):
-    j=0
-    if(do_parallel_MAF==True):
-        getter = operator.itemgetter(indexes)
-        x = list(map(list, map(getter, np.copy(inx))))
-    else:
-        x = inx
-    MAF_list = []
-    #print("LENGTH", len(x[0]))
-    if(categorical=="True"):
-        while j < (len(x[0])):
-            ref = 0
-            alt = 0
-            MAF = 0        
-            for i in range(len(x)):
-                if(i == 0):
-                    ref+=2
-                elif(i == 1):
-                    ref+=1
-                    alt+=1
-                elif(i == 2):
-                    alt+=2
-            if(alt<=ref):
-                MAF=alt/(ref+alt)
-                #major=ref/len(y)
-            else:
-                MAF=ref/(ref+alt)
-                #major=alt/len(y)
-                #print(MAF)
-            MAF_list.append(MAF)    
-            j+=1          
-    elif(categorical=="False"):
-        if(loss_type=="CE" or loss_type=="WCE" or loss_type=="FL"):
-            while j < (len(x[0])):
-                ref = 0
-                alt = 0
-                MAF = 0
-                for i in range(len(x)):
-                    ref+=x[i][j][0]
-                    alt+=x[i][j][1]
-                    if(x[i][j][0]!=x[i][j][1]):
-                        ref+=x[i][j][0]
-                        alt+=x[i][j][1]
-                if(alt<=ref):
-                    MAF=alt/(ref+alt)
-                    #major=ref/len(y)
-                else:
-                    MAF=ref/(ref+alt)
-                MAF_list.append(MAF)
-                j+=1
-        else:
-            while j < (len(x[0])):
-                ref = 0
-                alt = 0
-                MAF = 0
-                for i in range(len(x)):
-                    ref+=x[i][j][0]
-                    alt+=x[i][j][1]
-                if(alt<=ref):
-                    MAF=alt/(ref+alt)
-                    #major=ref/len(y)
-                else:
-                    MAF=ref/(ref+alt)
-                MAF_list.append(MAF)
-                j+=1
-    return MAF_list
-
-
-#TODO review this and make this work with CE, WCE, and FL
-def mean_estimated_r2_GPU(x, categorical=False):
-
-    #tf.reset_default_graph()
-    
-    sess = tf.Session(config=config)    
-    
-    def calculate_r2hat(x_genotypes, MAF):
-    #This calculates exactly the same r2 as the estimated r2hat from minimac4
-    #I copy this from Minimac4 source code, exactly as it is in Minimac4
-    #Credits to Minimac4 authors
-        r2hat=0
-        mycount = tf.cast(len(x_genotypes), tf_precision)
-        mysum = tf.cast(0, tf_precision)
-        mysum_Sq = tf.cast(0, tf_precision)
-        
-        if(MAF==0): #dont waste time
-            #print("r2hat", r2hat)
-            return r2hat
-        
-        for i in range(len(x_genotypes)):
-            #print("X", x_genotypes[i])
-            if(x_genotypes[i]==0):
-                d = 0
-            else:                
-                d = np.divide(x_genotypes[i],2)
-            
-            if (d>0.5):
-                d = 1-d
-                d = tf.cast(d, tf_precision)
-            mysum_Sq = sess.run(tf.add(mysum_Sq, tf.multiply(d,d)))
-            mysum = sess.run(tf.add(mysum,d))
-        
-        if(mycount < 2):#return 0
-            #print("r2hat", r2hat)
-            return r2hat
-        myvar = tf.cast(1e-30, tf_precision)
-        myf = sess.run(tf.div(mysum,tf.add(mycount,myvar)))
-        #print("myf", myf)
-        myevar = sess.run( tf.multiply(myf, tf.subtract(1.0,myf) ) )
-        #print("myevar", myf)
-        
-        #mysum_Sq - mysum * mysum / (mycount + 1e-30)
-        myovar = sess.run( tf.divide(tf.subtract(mysum_Sq,tf.multiply(mysum,mysum), tf.add(mycount,myvar))) )
-        #print("myovar", myovar)
-
-        if(myovar>0):
-
-            myovar = sess.run(tf.divide(myovar, tf.add(mycount,mayvar)))
-            r2hat = sess.run(tf.divide(myovar, tf.add(myevar, myvar)))
-        
-        #print("r2hat", r2hat)
-
-        return r2hat[0]
-     
-    j=0
-    mean_r2hat = 0
-    r2hats = []
-    #MAFs = calculate_MAF(x, categorical)
-    idx = 0
-    print(len(x[0]), len(MAF_all_var))
-    while j < len(x[0]):
-        if(categorical==False):
-            getter = operator.itemgetter([j+1])
-            x_genotypes = list(map(list, map(getter, np.copy(x))))
-            j+=2
-        else:
-            x_genotypes = []
-            for i in range(len(x)):
-                x_genotypes.append(np.argmax(x[i][j:j+3]))                
-            j+=3
-        
-        r2hat = calculate_r2hat(x_genotypes, MAF_all_var[idx])
-        r2hats.append(r2hat)
-        if(r2hat>0):
-            mean_r2hat += r2hat/len(MAF_all_var)
-        idx += 1 
-        if(idx>=len(MAF_all_var)):
-            break
-
-    #tf.reset_default_graph()
-    sess.close()
-                          
-    return mean_r2hat, r2hats
-
-#TODO review this and make this work with CE, WCE, and FL
-def mean_estimated_r2(x, categorical=False):
-
-    def calculate_r2hat(x_genotypes, MAF):
-    #This calculates exactly the same r2 as the estimated r2hat from minimac4
-    #I copy this from Minimac4 source code, exactly as it is in Minimac4
-    #Credits to Minimac4 authors
-        r2hat=0
-        mycount = len(x_genotypes)
-        mysum = 0
-        mysum_Sq = 0
-        
-        if(MAF==0): #dont waste time
-            #print("r2hat", r2hat)
-            return r2hat
-        
-        for i in range(mycount):
-            #print("X", x_genotypes[i])
-            if(x_genotypes[i]==0):
-                d = 0
-            else:
-                d = np.divide(x_genotypes[i],2)
-            
-            if (d>0.5):
-                d = 1-d
-            mysum_Sq += (d*d)
-            mysum += d
-        
-        if(mycount < 2):#return 0
-            #print("r2hat", r2hat)
-            return r2hat
-        
-        myf = mysum / (mycount + 1e-30)
-        #print("myf", myf)
-        myevar = myf * (1.0 - myf)
-        #print("myevar", myf)
-        myovar = mysum_Sq - mysum * mysum / (mycount + 1e-30)
-        #print("myovar", myovar)
-
-        if(myovar>0):
-
-            myovar = myovar / (mycount + 1e-30)
-            r2hat = myovar / (myevar + 1e-30)
-        
-        #print("r2hat", r2hat)
-
-        return r2hat
-     
-    j=0
-    mean_r2hat = 0
-    r2hats = []
-    #MAFs = calculate_MAF(x, categorical)
-    idx = 0
-    print(len(x[0]), len(MAF_all_var))
-    while j < len(x[0]):
-        if(categorical==False):
-            getter = operator.itemgetter([j+1])
-            x_genotypes = list(map(list, map(getter, np.copy(x))))
-            j+=2
-        else:
-            x_genotypes = []
-            for i in range(len(x)):
-                x_genotypes.append(np.argmax(x[i][j:j+3]))                
-            j+=3
-        
-        r2hat = calculate_r2hat(x_genotypes, MAF_all_var[idx])
-        r2hats.append(r2hat)
-        if(r2hat>0):
-            mean_r2hat += r2hat/len(MAF_all_var)
-        idx += 1 
-        if(idx>=len(MAF_all_var)):
-            break
-
-    return mean_r2hat, r2hats
-
-
-def filter_by_MAF(x,y, MAFs, threshold1=0, threshold2=1, categorical=False):
+def filter_by_MAF(x,y, MAFs, threshold1=0, threshold2=1):
     
     colsum=np.sum(y, axis=0)
     indexes_to_keep = []
@@ -1617,19 +1023,12 @@ def filter_by_MAF(x,y, MAFs, threshold1=0, threshold2=1, categorical=False):
 
     while i < len(MAFs):
         if(MAFs[i]>threshold1 and MAFs[i]<=threshold2):
-            if(categorical==True or categorical=="True"):
-                if(colsum[j]!=0 or colsum[j+1]!=0 or colsum[j+2]!=0):
-                    indexes_to_keep.append(j)
-                    indexes_to_keep.append(j+1)
-                    indexes_to_keep.append(j+2)
-            elif(categorical==False or categorical=="False"):
-                if(colsum[k]!=0 or colsum[k+1]!=0):
-                    indexes_to_keep.append(k)
-                    indexes_to_keep.append(k+1)
-                else:
-                    print("WARNING!!!!! INDEX", i, "HAS good MAF but colsum is zero")            
+            if(colsum[k]!=0 or colsum[k+1]!=0):
+                indexes_to_keep.append(k)
+                indexes_to_keep.append(k+1)
+            else:
+                print("WARNING!!!!! INDEX", i, "HAS good MAF but colsum is zero")            
         i += 1
-        j += 3
         k += 2
     if(verbose>0):
         print("FILTER BY MAF INDEXES TO KEEP:", len(indexes_to_keep), indexes_to_keep)
@@ -1641,10 +1040,9 @@ def filter_by_MAF(x,y, MAFs, threshold1=0, threshold2=1, categorical=False):
     
     return filtered_data_x, filtered_data_y
 
-def accuracy_maf_threshold(sess, x, y, MAFs, threshold1=0, threshold2=1, categorical=False):
-    
+def accuracy_maf_threshold(sess, x, y, MAFs, threshold1=0, threshold2=1):
 
-    filtered_data_x, filtered_data_y = filter_by_MAF(x,y, MAFs, threshold1, threshold2, categorical)
+    filtered_data_x, filtered_data_y = filter_by_MAF(x,y, MAFs, threshold1, threshold2)
     
     correct_prediction = np.equal( np.round( filtered_data_x ), np.round( filtered_data_y ) )
     accuracy_per_marker = np.mean(correct_prediction.astype(float), 0)
@@ -1652,16 +1050,13 @@ def accuracy_maf_threshold(sess, x, y, MAFs, threshold1=0, threshold2=1, categor
 
     return accuracy, accuracy_per_marker
 
-def MSE_maf_threshold(sess, x, y, MAFs, threshold1=0, threshold2=1, categorical=False):
+def MSE_maf_threshold(sess, x, y, MAFs, threshold1=0, threshold2=1):
     
-    filtered_data_x, filtered_data_y = filter_by_MAF(x,y, MAFs, threshold1, threshold2, categorical)
+    filtered_data_x, filtered_data_y = filter_by_MAF(x,y, MAFs, threshold1, threshold2)
     
     MSE_per_marker = np.mean(np.square( np.subtract( np.round( filtered_data_x ), np.round( filtered_data_y ) ) ), 0 ) 
     MSE = np.mean( MSE_per_marker )
     
-    #MSE_per_marker = sess.run( tf.reduce_mean(tf.square( tf.subtract( tf.round( filtered_data_x ), tf.round( filtered_data_y ) ) ), 0 ) )
-    #MSE = sess.run( tf.reduce_mean( MSE_per_marker ) )
-
     return MSE, MSE_per_marker
 
 def accuracy_maf_threshold_global(sess, x, y, indexes_to_keep):
@@ -1685,28 +1080,10 @@ def MSE_maf_threshold_global(sess, x, y, indexes_to_keep):
     
     MSE_per_marker = np.mean(np.square( np.subtract( np.round( filtered_data_x ), np.round( filtered_data_y ) ) ), 0 ) 
     MSE = np.mean( MSE_per_marker )
-    
-    #MSE_per_marker = sess.run( tf.reduce_mean(tf.square( tf.subtract( tf.round( filtered_data_x ), tf.round( filtered_data_y ) ) ), 0 ) )
-    #MSE = sess.run( tf.reduce_mean( MSE_per_marker ) )
 
     return MSE, MSE_per_marker
 
-
-
-def flatten_data(sess, myinput, factors=False):
-    x = np.copy(myinput)
-    if(factors == False): #if shape=3 we are using allele count instead of factors
-        x = np.reshape(x, (x.shape[0],-1))
-    else:#do one hot encoding, depth=3 because missing (-1) is encoded to all zeroes
-        x = (tf.one_hot(indices=x, depth=3))
-        x = (tf.layers.flatten(x))#flattening to simplify calculations later (matmul, add, etc)
-        x = x.eval()
-        #print("Dimensions after flatting", x.shape)
-    return x
-
-
 def flatten_data_np(x):
-    #x = np.copy(myinput)
     x = np.reshape(x, (x.shape[0],-1))
     return x
 
@@ -1731,29 +1108,17 @@ def define_biases(nh,no,last_layer=False):
 def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, beta, rho, data_obs):
 
     prep_start = timeit.default_timer()
-    
-    #custom beta will scale sparsity loss proportional to the number of features
-    if(custom_beta==True and beta>0):
-        beta = tf.cast(beta*data_obs.shape[1], tf_precision)
-    #otherwise, just scale sparsity loss by using beta as an absolute scaling value
-    else:
-        beta = tf.cast(beta, tf_precision)
+    beta = tf.cast(beta, tf_precision)
     
     print("Running autoencoder.")
     
-    factors = True
-    #subjects, SNP, REF/ALT counts
-    if(len(data_obs.shape) == 3):
-        factors = False
-
     print("Input data shape:")
-    #print(data_masked.shape)
     print(data_obs.shape)
     
     original_shape = data_obs.shape
     
     batch_size = int(round(len(data_obs)/split_size)) # size of training objects split the dataset in 10 parts
-    #print(batch_size)
+    print("Batch size:",batch_size)
     
     display_step = 1        
 
@@ -1794,13 +1159,12 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         hsize=convert_to_float(hsize)
         if(type(hsize) != type([])):
             hsize = [hsize]
-        #n_hidden_1 = int(round(n_output*hsize))  # hidden layer for encoder, equal to input number of features multiplied by a hidden size ratio
+        # hidden layer for encoder, equal to input number of features multiplied by a hidden size ratio
         n_hidden = [int(round(n_output*i)) for i in hsize]
     
     #if there are less hidden layer size values than number of hidden layer, replicate the first hidden layer size into the additional layers
     while(len(n_hidden)<NH):
         n_hidden.append(n_hidden[0])
-    
 
     print("Input data shape after coding variables:")
     print(n_input)
@@ -1844,67 +1208,34 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     print(encoder_operators[-1])
     tf.summary.histogram('activations', encoder_operators[1])
 
-    #encoder_result = encoder_op
     y_pred = tf.identity(y_pred, name="y_pred")
 
-    #print(encoder_op)
-    # predict result
-    #y_pred = decoder_op
-    # real input data as labels
     y_true = Y
-    #TODO experimental Maximal information criteria calculation needs to be implemented
-    #M = tf.zeros([n_input, n_input], name="MIC")
-   
-    rho_hat = tf.reduce_mean(encoder_operators[1],0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
-    if (act_val == "tanh"):
-        rho_hat = tf.div(tf.add(rho_hat,1.0),2.0) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
-    if (act_val == "relu" or act_val == "relu_tanh" or act_val == "relu,tanh"):
-        rho_hat = tf.div(tf.add(rho_hat,1e-10),tf.reduce_max(rho_hat)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
 
-    if(NH>=2 and all_sparse==True):
-        rho_hat2 = tf.reduce_mean(encoder_operators[2],0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
-        if (act_val == "tanh"):
-            rho_hat2 = tf.div(tf.add(rho_hat2,1.0),2.0) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
-        if (act_val == "relu" or act_val == "relu_tanh" or act_val == "relu,tanh"):
-            rho_hat2 = tf.div(tf.add(rho_hat2,1e-10),tf.reduce_max(rho_hat2)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
-    if(NH==3 and all_sparse==True):
-        rho_hat3 = tf.reduce_mean(encoder_operators[2],0) #RR sometimes returns Inf in KL function, caused by division by zero, fixed wih logfun()
-        if (act_val == "tanh"):
-            rho_hat3 = tf.div(tf.add(rho_hat3,1.0),2.0) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
-        if (act_val == "relu" or act_val == "relu_tanh" or act_val == "relu,tanh"):
-            rho_hat3 = tf.div(tf.add(rho_hat3,1e-10),tf.reduce_max(rho_hat3)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
-    
-    #rho = tf.constant(rho) #not necessary maybe?
+    rho_hat = []
+    #apply sparsity cost just to first layer if all_sparse==False
+    rho_hat.append(calculate_rho_hat(encoder_operators[1], act_val))
+    if(all_sparse==True):
+        for i in range(2,NH+1):
+           rho_hat.append(calculate_rho_hat(encoder_operators[i], act_val))
 
     with tf.name_scope('sparsity'):
-        sparsity_loss = tf.reduce_mean(KL_Div(rho, rho_hat))
+        sparsity_loss = KL_Div(rho, rho_hat[0])
         sparsity_loss = tf.cast(sparsity_loss, tf_precision)
-        #sparsity_loss = tf.clip_by_value(sparsity_loss, 1e-10, 1.0) #RR KL divergence, clip to avoid Inf or div by zero
-
-        if(NH>=2 and all_sparse==True):
-            sparsity_loss2 = tf.cast(tf.reduce_mean(KL_Div(rho, rho_hat2)), tf_precision)
-            #sparsity_loss2 = tf.clip_by_value(sparsity_loss2, 1e-10, 1.0) #RR KL divergence, clip to avoid Inf or div by zero
-            sparsity_loss = tf.add(sparsity_loss, sparsity_loss2)
-
-        if(NH==3 and all_sparse==True):
-            sparsity_loss3 = tf.cast(tf.reduce_mean(KL_Div(rho, rho_hat3)), tf_precision)
-            sparsity_loss = tf.add(sparsity_loss, sparsity_loss3)
-            
+        if(all_sparse==True):
+            for i in range(1,NH):
+                sparsity_loss = tf.add(sparsity_loss, tf.cast(KL_Div(rho, rho_hat[i]), tf_precision))
+            sparsity_loss = tf.div(sparsity_loss, tf.cast(NH, tf_precision))
         sparsity_loss = tf.cast(sparsity_loss, tf_precision, name="sparsity_loss") #RR KL divergence, clip to avoid Inf or div by zero
 
     tf.summary.scalar('sparsity_loss', sparsity_loss)
 
     # define cost function, optimizers
-    # loss function: MSE # example cost = tf.reduce_mean(tf.square(tf.subtract(output, x)))
     with tf.name_scope('loss'):
 
         if(loss_type=="MSE"):
             y_true = tf.cast(y_true, tf_precision)
             reconstruction_loss = tf.reduce_mean(tf.square(tf.subtract(y_true,y_pred)), name="reconstruction_loss") #RR simplified the code bellow
-        elif(loss_type=="Pearson"):
-            reconstruction_loss = pearson_r_loss(y_pred, y_true)
-        elif(loss_type=="WMSE"):
-            reconstruction_loss = weighted_MSE(y_pred, y_true)
         elif(loss_type=="CE"):
             reconstruction_loss = cross_entropy(y_pred, y_true)
         elif(loss_type=="WCE"):
@@ -1919,87 +1250,46 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         else:
             y_true = tf.cast(y_true, tf_precision)            
             reconstruction_loss = tf.reduce_mean(tf.square(tf.subtract(y_true,y_pred)), name="reconstruction_loss") #RR 
-        # newly added sparsity function (RHO, BETA)
-        #cost_sparse = tf.multiply(beta,  tf.reduce_sum(KL_Div(RHO, rho_hat)))
-        #print(cost_sparse) 
 
         cost = tf.reduce_mean(tf.add(reconstruction_loss,tf.multiply(beta, sparsity_loss)), name = "cost") #RR simplified equation
         
     tf.summary.scalar('reconstruction_loss_MSE', reconstruction_loss)
     tf.summary.scalar("final_cost", cost)
 
-    #TODO: add a second scaling factor for MAF loss, beta2*MAF_loss
-    #or add MAF as another feature instead of adding it to the loss function
-    #p-value for fisher exact test or similar type of test as MAF_loss
-    #MAF_loss = 0
-    #for i in range(0, len(y_pred[0])):
-    #        MAF_loss = MAF_loss + stat.fisher(y_pred[][i],y_true[][i])
-    #        
-    #cost = tf.reduce_mean(reconstruction_loss + beta * sparsity_loss + beta2 * MAF_loss)
-    #cost = tf.reduce_mean(cost + cost_sparse)
-    
     correct_prediction = 0
     
-    if(factors == False): #TODO: only factors==False is working now, TODO: fix the else: bellow
-        y_true = tf.cast(y_true, tf_precision)
-        correct_prediction = tf.equal( tf.round( y_pred ), tf.round( y_true ) )
-    else:
-        y_pred_shape = tf.shape(y_pred)
-        y_true_shape = tf.shape(y_true)   
-        #new_shape = [tf.cast(y_pred_shape[0], tf.int32), tf.cast(n_input/3,  tf.int32), tf.cast(3, tf.int32)]
-        #a = tf.cast(y_pred_shape[0], tf.int32)
-        #print("shape for calculating accuracy:", a.eval())
-        #print(new_shape.eval())
-        #new_shape = [tf.shape(y_true_shape)[0],original_shape[1], 3]
-        #reshaping back to original form, so the argmax function can work
-        y_pred_tmp = tf.reshape(y_pred, [tf.shape(y_true_shape)[0],original_shape[1], 3]) 
-        y_true_tmp = tf.reshape(y_true, [tf.shape(y_true_shape)[0],original_shape[1], 3])
-        y_pred_tmp = tf.argmax( y_pred_tmp, 1 ) #back to original categorical form [-1,0,1,2]
-        y_true_tmp = tf.argmax( y_true_tmp, 1 ) #back to original categorical form [-1,0,1,2]
-        #y_true_tmp = tf.argmax( y_true, 1 ) #back to original categorical form [-1,0,1,2]
-        #y_pred_tmp = tf.argmax( y_pred, 1 ) #back to original categorical form [-1,0,1,2]        
-     
-        correct_prediction = tf.equal( y_pred_tmp, y_true_tmp )
-        #correct_prediction = tf.equal( y_pred, y_true )
-                
+    y_true = tf.cast(y_true, tf_precision)
+    correct_prediction = tf.equal( tf.round( y_pred ), tf.round( y_true ) )
     
     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf_precision), name="accuracy")
     cost_accuracy = tf.add((1-accuracy), tf.multiply(beta, sparsity_loss), name="cost_accuracy")
     tf.summary.scalar('accuracy', accuracy)
     tf.summary.scalar('cost_accuracy', cost_accuracy)
     
-    #The RMSprop optimizer is similar to the gradient descent algorithm with momentum. 
-    #The RMSprop optimizer restricts the oscillations in the vertical direction. 
-    #Therefore, we can increase our learning rate and our algorithm could take larger steps in the horizontal direction converging faster. 
     #ref: https://towardsdatascience.com/a-look-at-gradient-descent-and-rmsprop-optimizers-f77d483ef08b
-    #Converge by accuracy when using factors
     if(recovery_mode=="False"):
         with tf.name_scope('train'):
             if(optimizer_type=="RMSProp"):
-                if(factors == False):
-                    optimizer = tf.train.RMSPropOptimizer(learning_rate, name="optimizer").minimize(cost)
-                else:
-                    optimizer = tf.train.RMSPropOptimizer(learning_rate, name="optimizer").minimize(cost_accuracy)
+                #This is a variant Adadelta that serves the same purpose, dynamic decay of a learning rate multiplier
+                optimizer = tf.train.RMSPropOptimizer(learning_rate, name="optimizer")
             elif(optimizer_type=="GradientDescent"):
-                if(factors == False):
-                    optimizer = tf.train.GradientDescentOptimizer(learning_rate, name="optimizer").minimize(cost)
-                else:
-                    optimizer = tf.train.GradientDescentOptimizer(learning_rate, name="optimizer").minimize(cost_accuracy)
+                #Typical gradient descent with fixed learning rate
+                optimizer = tf.train.GradientDescentOptimizer(learning_rate, name="optimizer")
             elif(optimizer_type=="Adam"):
-                if(factors == False):
-                    optimizer = tf.train.AdamOptimizer(learning_rate, name="optimizer").minimize(cost)
-                else:
-                    optimizer = tf.train.AdamOptimizer(learning_rate, name="optimizer").minimize(cost_accuracy)
-        print("Optimizer:", optimizer)
-        #save this optimizer to restore it later.
-        #tf.add_to_collection("optimizer", optimizer)
-        #tf.add_to_collection("Y", Y)
-        #tf.add_to_collection("X", X)
+                #Adaptive momentum in addition to the Adadelta features
+                optimizer = tf.train.AdamOptimizer(learning_rate, name="optimizer")
+            elif(optimizer_type=="Adadelta"):
+                #Linearly decaying learning rate
+                optimizer = tf.train.AdadeltaOptimizer(learning_rate, name="optimizer")
+            elif(optimizer_type=="Adagrad"):
+                #Adaptively scales the learning rate for each dimension
+                optimizer = tf.train.AdagradOptimizer(learning_rate, name="optimizer")
 
-    #optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cost)
+            optimizer = optimizer.minimize(cost)
+
+        print("Optimizer:", optimizer)
 
     # initialize variables
-    #init = tf.global_variables_initializer();
     init = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
 
     start = timeit.default_timer()
@@ -2008,15 +1298,11 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
     time_metrics = 0
     gd_time = 0
     # run autoencoder .........
-   
-    #with tf.device('/device:GPU:0'):  # Replace with device you are interested in
-    #    bytes_in_use = BytesInUse()
-    
     if(recovery_mode=="True"):
         tf.reset_default_graph()
 
 #    with tf.compat.v1.Session(config=config) as sess:
-    with tf.Session(config=config) as sess:        
+    with tf.Session(config=config) as sess:
         
         if(save_summaries==True):
             
@@ -2103,26 +1389,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             tf.summary.scalar('cost_accuracy', cost_accuracy)
             tf.summary.scalar('sparsity_loss', sparsity_loss)
 
-            '''
-            weights = {
-                'encoder_h1': graph.get_tensor_by_name("weights/w_encoder_h1:0"),
-                'decoder_h1': graph.get_tensor_by_name("weights/w_decoder_h1:0"),
-            }
-            variable_summaries(weights['encoder_h1'])
-
-            biases = {
-                'encoder_b1': graph.get_tensor_by_name("biases/b_encoder_b1:0"),
-                'decoder_b1': graph.get_tensor_by_name("biases/b_decoder_b1:0"),
-            }
-            '''
-            #variable_summaries(biases['encoder_b1'])
-            
             decoder_op = y_pred
-            #encoder_op = graph.get_tensor_by_name("Wx_plus_b/activation:0")
-            
-            #encoder_op =  graph.get_tensor_by_name("Wx_plus_b/dense/BiasAdd:0")
-
-            #tf.summary.histogram('activations', encoder_op)
 
             if(save_summaries==True):
 
@@ -2154,16 +1421,16 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 mask_rate = initial_masking_rate
             else:
                 mask_rate = 0.9 #set default if no value is provided
-            data_masked = mask_data_per_sample_parallel([0],np.copy(data_obs),mask_rate,categorical)
+            data_masked = mask_data_per_sample_parallel([0],np.copy(data_obs),mask_rate)
 
             mask_stop = timeit.default_timer()
             print("Time to run masking: ", mask_stop-mask_start)
             mask_time += mast_stop-mask_start
 
             if(disable_masking==False):
-                data_masked = flatten_data(sess, data_masked, factors)
+                data_masked = flatten_data_np(data_masked)
                 
-            data_obs = flatten_data(sess, data_obs, factors)
+            data_obs = flatten_data_np(data_obs)
 
             if(n_input!=n_output):
                 data_obs = list(map(list, map(o_getter, np.copy(data_obs))))
@@ -2201,12 +1468,12 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         
         if(save_summaries==True):
             if(verbose>1):
-                train_args = [merged,optimizer, cost, accuracy, reconstruction_loss, sparsity_loss, mygamma_0, mygamma_1, ce0, ce1,pt0, pt1, wce, y_pred]
+                train_args = [merged,optimizer, cost, accuracy, reconstruction_loss, sparsity_loss, rho_hat, mygamma_0, mygamma_1, ce0, ce1,pt0, pt1, wce, y_pred]
             else:
                 train_args = [merged,optimizer, cost, accuracy, reconstruction_loss, y_pred]
         else:
             if(verbose>1):
-                train_args = [optimizer, cost, accuracy, reconstruction_loss, sparsity_loss, mygamma_0, mygamma_1, ce0, ce1, pt0, pt1, wce, y_pred]
+                train_args = [optimizer, cost, accuracy, reconstruction_loss, sparsity_loss, rho_hat, mygamma_0, mygamma_1, ce0, ce1, pt0, pt1, wce, y_pred]
             else:
                 if(calculate_r2_per_epoch==True):
                     train_args = [optimizer, cost, accuracy, reconstruction_loss, y_pred]
@@ -2240,6 +1507,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     mask_rate += mask_increase
                 else:
                     mask_rate += initial_masking_rate
+                mask_rate=np.round(mask_rate,6)
 
             if(mask_rate>maximum_masking_rate):
                 mask_rate=maximum_masking_rate
@@ -2252,36 +1520,33 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             #make new masking on every new iteration
             if( (epoch>=0 and do_parallel_gd_and_mask==False) or epoch==0):
                 if(do_parallel_numpy_per_cycle == False):
-                    data_masked = mask_data_per_sample_parallel([0], np.copy(data_obs), mask_rate, categorical)
+                    data_masked = mask_data_per_sample_parallel([0], np.copy(data_obs), mask_rate)
                 if(do_parallel_numpy_per_cycle==True):
                     if(cycle_count==0):
-                        m_result, pool = submit_mask_tasks(np.copy(data_obs), mask_rate, categorical)
+                        m_result, pool = submit_mask_tasks(np.copy(data_obs), mask_rate)
                         data_masked_replicates = retrieve_cycle_results(m_result,pool)
                         
                     data_masked = data_masked_replicates[cycle_count]
                 
-                if(validate_after_epoch==True):
-                    data_val_masked = mask_data_per_sample_parallel([0], np.copy(data_obs),maximum_masking_rate,categorical)
+                if(validate_after_epoch==True or (validate_after_cycle==True and cycle_count==repeat_cycles) ):
+                    data_val_masked = mask_data_per_sample_parallel([0], np.copy(data_obs),maximum_masking_rate)
                     val_x = data_val_masked
                 if(verbose>0):
                     print("Mask done for epoch",iepoch,"Result length:",len(data_masked_replicates), "Data masked shape:", data_masked.shape)
                     
             train_x = np.copy(data_masked)
-            train_y = np.copy(data_obs)                               
-            #if(epoch>=0 and do_parallel_gd_and_mask==False or (epoch==0 and do_parallel_gd_and_mask==True)):
-                
+            train_y = np.copy(data_obs)
+
             mask_stop = timeit.default_timer()
             mask_time += mask_stop-mask_start
 
             flat_start = timeit.default_timer()
             #after masking, flatten data
-            #train_x = flatten_data(sess, train_x, factors)
-            #train_y = flatten_data(sess, train_y, factors)
             train_x = flatten_data_np(train_x)
             train_y = flatten_data_np(train_y)
             
-            if(validate_after_epoch==True):
-                val_x = flatten_data(sess, val_x, factors)
+            if(validate_after_epoch==True or (validate_after_cycle==True and cycle_count==repeat_cycles) ):
+                val_x = flatten_data_np(val_x)
 
             if(n_input!=n_output):
                 train_y = list(map(list, map(o_getter, np.copy(train_y))))
@@ -2291,14 +1556,10 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
             shuf_start = timeit.default_timer()
             if(shuffle==True):
-                #randomize = np.arange(len(train_x))
                 randomize = np.random.rand(len(train_x)).argsort()
-                #np.random.shuffle(randomize)
-                #train_x = np.asarray(train_x)
-                #train_y = np.asarray(train_y)
                 train_x = train_x[randomize]
                 train_y = train_y[randomize]
-                if(validate_after_epoch==True):
+                if(validate_after_epoch==True or (validate_after_cycle==True and cycle_count==repeat_cycles) ):
                     val_x = np.asarray(val_x)
                     val_x = val_x[randomize]
 
@@ -2324,13 +1585,10 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 if(verbose>0):
                     print("Running parallel gd and mask")
                 
-                
                 if(do_parallel_numpy_per_cycle==False or cycle_count==0):
                 
-                    #data_masked_replicates, my_result_list = run_parallel_gd_and_mask(sess, X, Y, data_masked, data_obs, mask_rate, categorical, train_args, batch_size)
-                    #faster to call directly from main process
                     mask_start = timeit.default_timer()
-                    m_result, pool = submit_mask_tasks(data_obs, mask_rate, categorical)
+                    m_result, pool = submit_mask_tasks(data_obs, mask_rate)
                     mask_stop = timeit.default_timer()
                     mask_time += mask_stop-mask_start
                     
@@ -2362,7 +1620,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                                
                 if(verbose>0):
                     print("Parallel gd and mask done")                
-            
+
             for i in range(total_batch):
                 
                 rest_start = timeit.default_timer()
@@ -2371,13 +1629,13 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     batch_x = train_x[i*batch_size:(i+1)*batch_size]
                     batch_y = train_y[i*batch_size:(i+1)*batch_size]                   
 
-                if(validate_after_epoch==True):
+                if(validate_after_epoch==True or (validate_after_cycle==True and cycle_count==repeat_cycles) ):
                     batch_val_x = val_x[i*batch_size:(i+1)*batch_size]
                     
                 rest_stop = timeit.default_timer()
                 rest_time += rest_stop-rest_start
                 #calculate cost and optimizer functions                    
-                if(i!=(total_batch-1) or last_batch_validation==False):
+                if(i!=(total_batch-1)):
                     gd_start = timeit.default_timer()
 
                     #train_args
@@ -2393,14 +1651,14 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
                     if(save_summaries==True):
                         if(verbose>1):
-                            summary, _, c, a, rl, sl, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = my_result
+                            summary, _, c, a, rl, sl, rh, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = my_result
                         else:
                             summary, _, c, a, rl, myy = my_result
                         train_writer.add_run_metadata(run_metadata, 'k%03d-step%03d-batch%04d' % (ki, epoch, i) )
                         train_writer.add_summary(summary, epoch)
                     else:
                         if(verbose>1):
-                            _, c, a, rl, sl, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = my_result
+                            _, c, a, rl, sl, rh, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = my_result
                         else:
                             if(calculate_r2_per_epoch==True):
                                 _, c, a, rl, myy = my_result
@@ -2442,8 +1700,10 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 c_tmp=c/total_batch
                 epoch_cost+=c_tmp
                 avg_cost+=c_tmp/window
+                if(verbose>1 and i==0):
+                    print("batch cost c:",c, "Sparsity loss:", sl, "rho_hat range:", np.min(rh), np.max(rh))
 
-                if(validate_after_epoch==True):
+                if(validate_after_epoch==True or (validate_after_cycle==True and cycle_count==repeat_cycles) ):
                     my_val_pred = vc, va, vrl, vmyy  = sess.run([cost, accuracy, reconstruction_loss, y_pred], feed_dict={X: batch_val_x, Y: batch_y} )    
                     my_vr2_tmp = pearson_r2(vmyy, batch_y)
                     val_avg_r2 += np.sum(my_vr2_tmp['r2_per_sample'])/len(my_vr2_tmp['r2_per_sample'])/total_batch
@@ -2451,14 +1711,33 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     val_avg_rl += vrl/total_batch
                     val_epoch_cost+=vc/total_batch
                     val_avg_cost+=vc/total_batch/window
-                    
-                rest_stop = timeit.default_timer()
-                rest_time += rest_stop-rest_start                        
 
-            ############BATCH ENDS HERE   
-                    
+                if(save_activations==True and (iepoch==training_epochs or (epoch+1) % window == 0) ):
+                    my_act = sess.run([encoder_operators[-1]], feed_dict={X: batch_x, Y: batch_y} )
+                    act_dir = os.path.basename(sys.argv[1])+"_activations"
+                    fname = act_dir + "/batch_" + str(i) + ".out"
+                    print("Saving activations to", fname,flush=True)
+                    with open(fname, 'w') as f:
+                         np.savetxt(f,  my_act[0])
+                    f.close()
+                    print("Saving activations to complete.",flush=True)
+                    if((i+1)==total_batch):
+                        my_act = sess.run([encoder_operators[-1]], feed_dict={X: train_x[(i+1)*batch_size:], Y: train_y[(i+1)*batch_size:]} )
+                        fname = act_dir + "/batch_" + str(i+1) + ".out"
+                        print("Saving activations to", fname,flush=True)
+                        with open(fname, 'w') as f:
+                             np.savetxt(f,  my_act[0])
+                        f.close()
+                        print("Saving activations to complete.",flush=True)
+
+                rest_stop = timeit.default_timer()
+                rest_time += rest_stop-rest_start
+
+
+            ############BATCH ENDS HERE
+
             rest_start = timeit.default_timer()
-                
+
             if(save_pred==True): #if using cluster run for all k fold: if(save_pred==True):
                 #This generates 1GB files per epoch per k-fold iteration, at least 5TB of space required, uncoment when using the HPC cluster with big storage
                 my_pred = sess.run([y_pred], feed_dict={X: val_x, Y: val_y} )
@@ -2471,7 +1750,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             if(epoch==early_stop_begin):
                 #mask_increase
                 mask_increase = 0.2*(repeat_cycles+1)/window
-                mask_rate
+                #mask_rate
                 mask_rate=0.8
             if(epoch>early_stop_begin and epoch % window == 0):
                 #mask_rate
@@ -2491,7 +1770,6 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 avg_cost=0
                 val_avg_cost=0
 
-                
 ################Epoch end here
             if(verbose>1):
                 print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", epoch_cost, " Accuracy:", avg_a, " Reconstruction loss (" , loss_type, "): ", avg_rl, "Sparsity loss:", sl,"sr2:", avg_r2, flush=True)
@@ -2505,11 +1783,22 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 print("fl:", rl)
                 print("myy:", myy)
             else:
+                if(avg_r2 != 'DISABLED'):
+                    avg_r2 = np.round(avg_r2, 6)
+                if(avg_a != 'DISABLED'):
+                    avg_a = np.round(avg_a, 6)
+                avg_rl = np.round(avg_rl, 6)
+                epoch_cost = np.round(epoch_cost, 6)
                 print("Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", epoch_cost, " Accuracy:", avg_a, " s_r2:", avg_r2, " Reconstruction loss (" , loss_type, "): ", avg_rl, flush=True)
-            if(validate_after_epoch==True):
+
+            if(validate_after_epoch==True  or (validate_after_cycle==True and cycle_count==repeat_cycles) ):
+                val_epoch_cost = np.round(val_epoch_cost,6)
+                val_avg_a = np.round(val_avg_a, 6)
+                val_avg_r2 = np.round(val_avg_r2, 6)
+                val_avg_rl = np.round(val_avg_rl, 6)
+
                 print("VALIDATION:Epoch ", epoch, " done. Masking rate used:", mask_rate, " Initial one:", initial_masking_rate, " Loss: ", val_epoch_cost, " Accuracy:", val_avg_a, " s_r2:", val_avg_r2, " Reconstruction loss (" , loss_type, "): ", val_avg_rl, flush=True)
 
-            
             rest_stop = timeit.default_timer()
             rest_time += rest_stop-rest_start  
                             
@@ -2532,14 +1821,17 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 saver.save(sess, filename)
                 print("Saving model done")
 
-            save_stop = timeit.default_timer()
-            save_time += save_stop-save_start  
+                if(custom_cmd!=''):
+                    custom_result = run_custom_cmd()
+                    print("CUSTOM:Epoch",epoch,"RESULT:", custom_result)
 
-        
+            save_stop = timeit.default_timer()
+            save_time += save_stop-save_start
+
             if(time_to_stop==True):
                 print("Stop criteria satisfied: epoch =", epoch, "previous_window_avg_cost =", previous_window_avg_cost, "current_window_avg_cost =", current_window_avg_cost)
-                break  
-    
+                break
+
         if(save_pred==True):
 
             fname = "k-" + str(ki) + "_train-obs.out"
@@ -2587,7 +1879,6 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
                 my_F1_tmp = f1_score(my_pred, batch_y, sess)
                 my_r2_tmp = pearson_r2(my_pred, batch_y)
-                #print(i,total_batch,my_r2_tmp['r2_per_sample'])
                 my_r2 += np.sum(my_r2_tmp['r2_per_sample'])/len(my_r2_tmp['r2_per_sample'])/total_batch
 
                 my_F1[0] += my_F1_tmp[0]/total_batch
@@ -2610,17 +1901,15 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             my_F1 = f1_score(my_pred, train_y, sess)
             my_r2='NA'
             if(report_perf_by_rarity==True):
-                #my_acc_t[0], _ = accuracy_maf_threshold(sess, my_pred, val_y, MAF_all_var, 0.005, 1, factors)
-                #my_acc_t[1], _ = accuracy_maf_threshold(sess, my_pred, val_y, 0, 0.005, factors)
-                my_acc_t[2], _ = accuracy_maf_threshold(sess, my_pred, train_y, MAF_all_var, 0, 0.01, factors)
-                my_acc_t[3], _ = accuracy_maf_threshold(sess, my_pred, train_y, MAF_all_var, 0.01, 1, factors) 
+                my_acc_t[2], _ = accuracy_maf_threshold(sess, my_pred, train_y, MAF_all_var, rare_threshold1, rare_threshold2)
+                my_acc_t[3], _ = accuracy_maf_threshold(sess, my_pred, train_y, MAF_all_var, common_threshold1, common_threshold2)
             else:
                 my_acc_t[0], my_acc_t[1],my_acc_t[2],my_acc_t[3] = "NA","NA", "NA", "NA"
 
         r_report_start = timeit.default_timer()
 
-        print("Accuracy [MAF 0-0.01]:", my_acc_t[2])
-        print("Accuracy [MAF 0.01-1]:", my_acc_t[3])
+        print("Accuracy [MAF",rare_threshold1,"-",rare_threshold2,"]", my_acc_t[2])
+        print("Accuracy [MAF",common_threshold1,"-",common_threshold2,"]", my_acc_t[3])
         print("F1 score [MAF 0-1]:", my_F1)
         print("R-squared per sample:", my_r2)
 
@@ -2630,22 +1919,17 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
         if(detailed_metrics==True):
 
-            #my_pred = sess.run([y_pred], feed_dict={X: train_x, Y: train_y})
             my_pred = sess.run([y_pred], feed_dict={X: train_x, Y: train_y})
             my_pred = my_pred[0]
             print("Accuracy per veriant...")
-            my_acc_t[0], acc_per_m = accuracy_maf_threshold(sess, my_pred, train_y, MAF_all_var, 0, 1, factors)
+            my_acc_t[0], acc_per_m = accuracy_maf_threshold(sess, my_pred, train_y, MAF_all_var, 0, 1)
 
             print("MSE per veriant...")
-            my_MSE, MSE_list = MSE_maf_threshold(sess, my_pred, train_y, MAF_all_var, 0, 1, factors)
+            my_MSE, MSE_list = MSE_maf_threshold(sess, my_pred, train_y, MAF_all_var, 0, 1)
 
-            print("Estimated r2hat per veriant...")
-            mean_r2hat_est, my_r2hat_est = mean_estimated_r2(train_y, factors)
             print("Emprirical r2hat per veriant...")
-            mean_r2hat_emp, my_r2hat_emp = mean_empirical_r2(train_x, train_y, factors)
+            mean_r2hat_emp, my_r2hat_emp = mean_empirical_r2(train_x, train_y)
 
-
-        #print("MAF", len(my_MAF_list), "acc", len(acc_per_m), "r2emp", len(my_r2hat_emp), "r2est", len(my_r2hat_emp), "MSE", len(MSE_list))
         if(detailed_metrics==True):
             idx=1
             for i in range(len(MAF_all_var)):
@@ -2716,13 +2000,15 @@ def main():
     print("Number of arguments: ", len(sys.argv)-1)
     print("The arguments are: " , str(sys.argv))
 
-    if(len(sys.argv)!=6 and len(sys.argv)!=7):
-        return False
-    
     if(save_model==True):
         model_dir=os.path.basename(sys.argv[1])+"_model"
         if(os.path.exists(model_dir)==False):
             os.mkdir(model_dir)
+
+    if(save_activations==True):
+        act_dir=os.path.basename(sys.argv[1])+"_activations"
+        if(os.path.exists(act_dir)==False):
+            os.mkdir(act_dir)
 
     #mask_rate=0.9
     
@@ -2746,98 +2032,105 @@ def main():
     global NH
     global model_index
 
-    if(len(sys.argv)==6 or len(sys.argv)==7):
-        print("Parsing input file: ")
-            #Arguments
-            #sys.argv[1] = [str] input file (HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf)
-            #sys.argv[2] = [str] hyperparameter list file (mylist.txt)
-            #sys.argv[3] = [True,False] Recovery mode, default is False
-            #sys.argv[4] = [1/846] Initial masking rate
-            #sys.argv[5] = [0.98] Final masking rate
-            #sys.argv[6] = [str] only needed if recovery mode is True, path to the .ckpt file
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-v','--verbose', type=int, default=0, dest='verbose', help="Increase output verbosity")
+    parser.add_argument('-c', '--custom', type=str, default='', dest="custom_cmd", help="Custom validation script file to run after each checkpoint")
+    parser.add_argument('argv', nargs='*')
+    ar = parser.parse_args()
 
-        recovery_mode = sys.argv[3]
-        #If enabling recovery mode to resume training, provide model path after masking rates, as last parameter
-        if(recovery_mode=="True"):
-            #path to the .ckpt file, example: ./recovery/inference_model-1.ckpt
-            model_path=sys.argv[6]
+    global verbose
+    verbose = ar.verbose
+    global custom_cmd
+    custom_cmd = ar.custom_cmd
 
-        initial_masking_rate = convert_to_float(sys.argv[4])
-        maximum_masking_rate = convert_to_float(sys.argv[5])
-
-        if(maximum_masking_rate==0):
-            disable_masking = True
-        else:
-            disable_masking = False
-
-        if(maximum_masking_rate==initial_masking_rate):
-            fixed_masking_rate = True
-        else:
-            fixed_masking_rate = False
-            if(early_stop_begin==0):
-                den=window
-            else:
-                den=early_stop_begin
-            mask_increase = (maximum_masking_rate-initial_masking_rate)*(1+repeat_cycles)/den
-
-        print("disable_masking =", disable_masking)
-        print("fixed_masking_rate =", fixed_masking_rate)
-        print("initial_masking_rate =", initial_masking_rate)
-        print("maximum_masking_rate =", maximum_masking_rate)
-        print("reading hyperparameter list from file: ", sys.argv[2])
-
-        hp_array = []
-        result_list = []
-
-        with open(sys.argv[2]) as my_file:
-            for line in my_file:
-                if not line.startswith('#'):
-                    hp_array.append(line.split())
-                    
-        i = 0
-        print("number of hyperparameter sets found:", len(hp_array))
-        
-        while(i < len(hp_array)):
-            
-            l1 = float(hp_array[i][0]) #[float] L1 hyperparameter value
-            l2 = float(hp_array[i][1]) #[float] L2 hyperparameter value
-            beta = float(hp_array[i][2]) #[float] Sparsity beta hyperparameter value
-            rho = float(hp_array[i][3]) #[float] Sparseness rho hyperparameter value
-            act = str(hp_array[i][4]) #[str] Activation function ('tanh')
-            lr = float(hp_array[i][5]) #[float] Learning rate hyperparameter value
-            gamma = float(hp_array[i][6]) #[float] gamma hyper parameter value
-            optimizer_type = str(hp_array[i][7]) #[string] optimizer type
-            loss_type = str(hp_array[i][8]) #[string] loss function type
-            hsize=str(hp_array[i][9]) #[float,string] hidden layer size
-            left_buffer=int(hp_array[i][10]) #[int] left buffer size (number of features to be excluded from output layer start)
-            right_buffer=int(hp_array[i][11]) #[int] right buffer size (number of features to be excluded from output layer end)
-            keep_rate=convert_to_float(str(hp_array[i][12])) #[1,0.5] single float=keep prob of single hidden layer, float vector (0.5,1,1) = keep prob of each hidden layer, the number of hidden layers will be detected automatically from the number of keep_rate values provided, values are comma separated.
-            if(',' in str(hp_array[i][12])):
-                print("keep_rate:",keep_rate)
-                NH=len(keep_rate)
-            else:
-                keep_rate=[keep_rate]
-                print("keep_rate:",keep_rate)
-                NH=1
-            
-            if(i==0):
-                data_obs = process_data(sys.argv[1],categorical) #input file, i.e: HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf
-
-            tmp_list = hp_array[i]
-            print("Starting autoencoder training. Model: ", str(model_index), "Parameters:", tmp_list)
-            my_cost, my_rloss, my_sloss, my_acc,  my_racc, my_cacc, my_micro, my_macro, my_weighted, my_r2  = run_autoencoder(lr, training_epochs, l1, l2, act, beta, rho, data_obs)
-            tmpResult = [my_cost, my_rloss, my_sloss, my_acc,  my_racc, my_cacc, my_micro, my_macro, my_weighted, my_r2]
-            tmp_list.extend(tmpResult)
-            result_list.append(tmp_list)
-            i += 1
-            model_index+=1
-            print("TMP_RESULT: ", tmp_list)
-        return result_list
-            
-    else:   
-       
+    if(len(ar.argv)!=5 and len(ar.argv)!=6):
         return False
 
+    print("Parsing input file: ")
+        #Arguments
+        #ar.argv[0] = [str] input file (HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf)
+        #ar.argv[1] = [str] hyperparameter list file (mylist.txt)
+        #ar.argv[2] = [True,False] Recovery mode, default is False
+        #ar.argv[3] = [1/846] Initial masking rate
+        #ar.argv[4] = [0.98] Final masking rate
+        #ar.argv[5] = [str] only needed if recovery mode is True, path to the .ckpt file
+    recovery_mode = ar.argv[2]
+    #If enabling recovery mode to resume training, provide model path after masking rates, as last parameter
+    if(recovery_mode=="True"):
+        #path to the .ckpt file, example: ./recovery/inference_model-1.ckpt
+        model_path=ar.argv[5]
+
+    initial_masking_rate = convert_to_float(ar.argv[3])
+    maximum_masking_rate = convert_to_float(ar.argv[4])
+
+    if(maximum_masking_rate==0):
+        disable_masking = True
+    else:
+        disable_masking = False
+
+    if(maximum_masking_rate==initial_masking_rate):
+        fixed_masking_rate = True
+    else:
+        fixed_masking_rate = False
+        if(early_stop_begin==0):
+            den=window
+        else:
+            den=early_stop_begin
+        mask_increase = (maximum_masking_rate-initial_masking_rate)*(1+repeat_cycles)/den
+
+    print("disable_masking =", disable_masking)
+    print("fixed_masking_rate =", fixed_masking_rate)
+    print("initial_masking_rate =", initial_masking_rate)
+    print("maximum_masking_rate =", maximum_masking_rate)
+    print("reading hyperparameter list from file: ", ar.argv[1])
+
+    hp_array = []
+    result_list = []
+
+    with open(ar.argv[1]) as my_file:
+        for line in my_file:
+            if not line.startswith('#'):
+                hp_array.append(line.split())
+
+    i = 0
+    print("number of hyperparameter sets found:", len(hp_array))
+
+    while(i < len(hp_array)):
+
+        l1 = float(hp_array[i][0]) #[float] L1 hyperparameter value
+        l2 = float(hp_array[i][1]) #[float] L2 hyperparameter value
+        beta = float(hp_array[i][2]) #[float] Sparsity beta hyperparameter value
+        rho = float(hp_array[i][3]) #[float] Sparseness rho hyperparameter value
+        act = str(hp_array[i][4]) #[str] Activation function ('tanh')
+        lr = float(hp_array[i][5]) #[float] Learning rate hyperparameter value
+        gamma = float(hp_array[i][6]) #[float] gamma hyper parameter value
+        optimizer_type = str(hp_array[i][7]) #[string] optimizer type
+        loss_type = str(hp_array[i][8]) #[string] loss function type
+        hsize=str(hp_array[i][9]) #[float,string] hidden layer size
+        left_buffer=int(hp_array[i][10]) #[int] left buffer size (number of features to be excluded from output layer start)
+        right_buffer=int(hp_array[i][11]) #[int] right buffer size (number of features to be excluded from output layer end)
+        keep_rate=convert_to_float(str(hp_array[i][12])) #[1,0.5] single float=keep prob of single hidden layer, float vector (0.5,1,1) = keep prob of each hidden layer, the number of hidden layers will be detected automatically from the number of keep_rate values provided, values are comma separated.
+        if(',' in str(hp_array[i][12])):
+            print("keep_rate:",keep_rate)
+            NH=len(keep_rate)
+        else:
+            keep_rate=[keep_rate]
+            print("keep_rate:",keep_rate)
+            NH=1
+
+        if(i==0):
+            data_obs = process_data(ar.argv[0]) #input file, i.e: HRC.r1-1.EGA.GRCh37.chr9.haplotypes.9p21.3.vcf
+
+        tmp_list = hp_array[i]
+        print("Starting autoencoder training. Model: ", str(model_index), "Parameters:", tmp_list)
+        my_cost, my_rloss, my_sloss, my_acc,  my_racc, my_cacc, my_micro, my_macro, my_weighted, my_r2  = run_autoencoder(lr, training_epochs, l1, l2, act, beta, rho, data_obs)
+        tmpResult = [my_cost, my_rloss, my_sloss, my_acc,  my_racc, my_cacc, my_micro, my_macro, my_weighted, my_r2]
+        tmp_list.extend(tmpResult)
+        result_list.append(tmp_list)
+        i += 1
+        model_index+=1
+        print("TMP_RESULT: ", tmp_list)
+    return result_list
 
 
 if __name__ == "__main__":
@@ -2873,7 +2166,6 @@ if __name__ == "__main__":
             "    1e-06 1e-06 0.001 0.07 relu 10 5 RMSProp WCE sqrt 0 12 1\n",
             "    1e-05 1e-08 6 0.04 tanh 1e-05 2 GradientDescent FL 1 23 11 1,0.5\n",
             "    0.01 0.0001 0.01 0.004 tanh 0.0001 0 Adam FL 0.5 10 0 1,1,0.3\n")
-        
         sys.exit()
         
     print("LABELS  [L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size, LB, RB, rsloss, rloss, sloss, acc, ac_r, ac_c, F1_micro, F1_macro, F1_weighted, sr2]") 
