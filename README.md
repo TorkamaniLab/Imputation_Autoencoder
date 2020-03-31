@@ -77,24 +77,24 @@ Where my_param.txt (hyperparameter file) should contain the following hyperparam
 
 - L1: [float] L1 (Lasso) regularizer, small values recommended, should be less than 1, typically between 1e-2 and 1e-8
 - L2: [float] L2 (Ridge) regularizer, small values recommended, should be less than 1, typically between 1e-2 and 1e-8
-- beta: [float] Sparsity scaling factor beta, any value grater than 1
-- rho: [float] Desired average hidden layer activation (rho), less than 1
-- act: [string] Activation function type, values supported: ['sigmoid','tanh', 'relu']
+- BETA: [float] Sparsity scaling factor beta, any value grater than 1
+- RHO: [float] Desired average hidden layer activation (rho), less than 1
+- ACT: [string] Activation function type, values supported: ['sigmoid','tanh', 'relu']
 - LR: [float] Learning rate
-- gamma: [float] scaling factor for focal loss, ignored when loss_type!=FL
-- optimizer: [string] optimizer type, values supported: ['GradientDescent', 'Adam', 'RMSProp']
-- loss_type: [string] loss type, values supported: ['MSE', 'CE', 'WCE', 'FL'], which respectively mean: mean squared error, cross entropy, weighted cross entropy, and focal loss.
-- h_size: [float,string] hidden layer size, if 'sqrt' the hidden layer size will be equal to the square root of the input layer size, if float, the hidden layer size will be the hyperparameter value multiplied by input layer size
+- GAMMA: [float] scaling factor for focal loss, ignored when loss_type!=FL
+- OPT: [string] optimizer type, values supported: ['GradientDescent', 'Adam', 'RMSProp']
+- LT: [string] loss type, values supported: ['MSE', 'CE', 'WCE', 'FL'], which respectively mean: mean squared error, cross entropy, weighted cross entropy, and focal loss.
+- HS: [float,string] hidden layer size, if 'sqrt' the hidden layer size will be equal to the square root of the input layer size, if float, the hidden layer size will be the hyperparameter value multiplied by input layer size
 - LB: [int] left buffer size, number of upstream input variants to be excluded from output layer
 - RB: [int] right buffer size, number of downstream input variants to be excluded from output layer
 - KP: [float vector] keep probability of each hidden layer, the number of hidden layers will be detected automatically from the number of values provided, each value must be comma separated (e.g: 1.0,0.8,0.3 for 3 hidden layers; 1.0,0.5 for 2 hidden layers, 0.5 for 1 hidden layer, etc.)
 
 Each hyperparamter should be separated by space or tab, one hyper parameter set per line, for example (cat 3_hyper_par_set.txt):
 ```
-#L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size, LB, RB, KP
-1e-06 1e-06 0.001 0.07 relu 10 5 RMSProp WCE sqrt 0 12 1
-1e-05 1e-08 6 0.04 tanh 1e-05 2 GradientDescent FL 1 23 11 1,0.5
-0.01 0.0001 0.01 0.004 tanh 0.0001 0 Adam FL 0.5 10 0 1,1,0.3
+#L1 L2 BETA RHO ACT LR GAMMA OPT LT HS LB RB KP
+9.9e-07 0.0001 5 0.05 tanh 0.0001 5 Adam FL 1 0 0 1,0.25
+9.9e-07 0.0001 5 0.1 tanh 0.0001 5 RMSProp FL 1 0 0 1,0.25
+9.9e-07 0.0001 5 0.2 tanh_none 0.0001 5 Adam FL 1 0 0 1,0.25
 ```
 
 A more practical example:
