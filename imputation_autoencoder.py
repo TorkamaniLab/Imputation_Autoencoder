@@ -79,8 +79,6 @@ hysteresis=0.001 #stop criteria, improvement ratio, extra room in the threshold 
 ############Masking options
 fixed_masking = False #True: mask variants only at the beggining of the training cycle, False: mask again with a different pattern after each iteration (data augmentation mode)
 mask_per_sample = True #True: randomly mask genotypes per sample instead of mask the entire variant for all samples, False: mask the entire variant for all samples 
-random_masking = True #set random masks instead of preset ones
-mask_preset = False #True: mask from genotype array
 shuffle = True #Whether shuffle data or not at the begining of training cycle. Not necessary for online data augmentation.
 repeat_cycles = 4 #how many times to repeat the masking rate
 validate_after_epoch=False #after each epoch, apply a new masking pattern, then calculate validation accuracy on the new unseen mask pattern
@@ -645,7 +643,7 @@ def calculate_rho_hat(activations, act_val):
 
     if(act_val.startswith("tanh") or act_val.startswith("relu") or act_val.startswith("softplus")):
         rho_hat = tf.add(rho_hat,tf.abs(tf.reduce_min(rho_hat))) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
-        rho_hat = tf.div(rho_hat,tf.reduce_max(rho_hat)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
+        rho_hat = tf.div_no_nan(rho_hat,tf.reduce_max(rho_hat)) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
 
     #avoid nan
     rho_hat = tf.clip_by_value(rho_hat, eps, one-eps)
@@ -817,16 +815,16 @@ def f1_score(y_pred, y_true, sess):
         
         TP = tf.add(TP, eps)
         
-        precision = tf.divide(TP, tf.add(TP, FP))
-        recall = tf.divide(TP, tf.add(TP, FN))
+        precision = tf.div_no_nan(TP, tf.add(TP, FP))
+        recall = tf.div_no_nan(TP, tf.add(TP, FN))
         top = tf.multiply(precision, recall)
         bottom = tf.add(precision, recall)
-        f1 = tf.multiply(two, tf.divide(top,bottom))
+        f1 = tf.multiply(two, tf.div_no_nan(top,bottom))
 
         f1s[i] = tf.reduce_mean(f1)
 
     weights = tf.reduce_sum(y_true, axis=0)
-    weights = tf.divide(weights,tf.reduce_sum(weights))
+    weights = tf.div_no_nan(weights,tf.reduce_sum(weights))
 
     f1s[2] = tf.reduce_sum(tf.multiply(f1, weights))
 
@@ -982,13 +980,11 @@ def decoder(x, func, weights, biases):
 
     elif(func.endswith('none')):
         print('Decoder Activation function: none')
-        layer_1 = tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1'], name="y_pred")
+        layer_1 = tf.add(tf.matmul(x, weights['decoder_h1']), biases['decoder_b1'])
 
-    if(func.endswith("tanh") or func.endswith("relu") or func.endswith("softplus")):
+    if(not func.endswith("sigmoid")):
         layer_1 = tf.add(layer_1,tf.abs(tf.reduce_min(layer_1))) # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
-        layer_1 = tf.div(layer_1,tf.reduce_max(layer_1), name="y_pred") # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
-        #layer_1 = tf.add(layer_1,1.0)
-        #layer_1 = tf.div(layer_1,2.0, name="y_pred")
+        layer_1 = tf.div_no_nan(layer_1,tf.reduce_max(layer_1), name="y_pred") # https://stackoverflow.com/questions/11430870/sparse-autoencoder-with-tanh-activation-from-ufldl
 
     return layer_1
 
@@ -1225,7 +1221,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         if(all_sparse==True):
             for i in range(1,NH):
                 sparsity_loss = tf.add(sparsity_loss, tf.cast(KL_Div(rho, rho_hat[i]), tf_precision))
-            sparsity_loss = tf.div(sparsity_loss, tf.cast(NH, tf_precision))
+            sparsity_loss = tf.div_no_nan(sparsity_loss, tf.cast(NH, tf_precision))
         sparsity_loss = tf.cast(sparsity_loss, tf_precision, name="sparsity_loss") #RR KL divergence, clip to avoid Inf or div by zero
 
     tf.summary.scalar('sparsity_loss', sparsity_loss)
