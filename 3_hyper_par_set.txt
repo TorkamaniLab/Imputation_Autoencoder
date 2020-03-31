@@ -1,4 +1,4 @@
-#L1, L2, BETA, RHO, ACT, LR, gamma, optimizer, loss_type, h_size, LB, RB, KP
-1e-06 1e-06 0.001 0.07 relu 10 5 RMSProp WCE sqrt 0 12 1
-1e-05 1e-08 6 0.04 tanh 1e-05 2 GradientDescent FL 1 23 11 1,0.5
-0.01 0.0001 0.01 0.004 tanh 0.0001 0 Adam FL 0.5 10 0 1,1,0.3
+#L1 L2 BETA RHO ACT LR GAMMA OPT LT HS LB RB KP
+9.9e-07 0.0001 5 0.05 tanh 0.0001 5 Adam FL 1 0 0 1,0.25
+9.9e-07 0.0001 5 0.1 tanh 0.0001 5 RMSProp FL 1 0 0 1,0.25
+9.9e-07 0.0001 5 0.2 tanh_none 0.0001 5 Adam FL 1 0 0 1,0.25
