@@ -86,9 +86,6 @@ validate_after_cycle=False
 calculate_r2_per_epoch=False
 calculate_acc_per_epoch=False
 
-############debugging options
-verbose=0
-
 ###################################OPTIONS#############################################
 
 def cmd_exists(cmd):
@@ -910,10 +907,8 @@ def encoder(x, func, l1_val, l2_val, weights, biases, units_num, keep_rate): #RR
     x=tf.cast(x, tf_precision)
     
     print("Setting up encoder/decoder.")
-    if(l2_val==0):
-        regularizer = tf.contrib.layers.l1_regularizer(l1_val)
-    else:
-        regularizer = tf.contrib.layers.l1_l2_regularizer(l1_val,l2_val)
+    #https://stackoverflow.com/questions/37107223/how-to-add-regularizations-in-tensorflow
+    regularizer = tf.contrib.layers.l1_l2_regularizer(l1_val,l2_val)
 
     print("keep_rate:", keep_rate)
     #dropout
@@ -1222,7 +1217,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             for i in range(1,NH):
                 sparsity_loss = tf.add(sparsity_loss, tf.cast(KL_Div(rho, rho_hat[i]), tf_precision))
             sparsity_loss = tf.div_no_nan(sparsity_loss, tf.cast(NH, tf_precision))
-        sparsity_loss = tf.cast(sparsity_loss, tf_precision, name="sparsity_loss") #RR KL divergence, clip to avoid Inf or div by zero
+        sparsity_loss = tf.cast(sparsity_loss, tf_precision, name="sparsity_loss")
 
     tf.summary.scalar('sparsity_loss', sparsity_loss)
 
@@ -1234,8 +1229,6 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
             reconstruction_loss = tf.reduce_mean(tf.square(tf.subtract(y_true,y_pred)), name="reconstruction_loss") #RR simplified the code bellow
         elif(loss_type=="CE"):
             reconstruction_loss = cross_entropy(y_pred, y_true)
-        elif(loss_type=="WCE"):
-            reconstruction_loss = weighted_cross_entropy(y_pred, y_true)
         elif(loss_type=="FL"):
             reconstruction_loss = focal_loss(y_pred, y_true)
             if(verbose>0):
@@ -1244,11 +1237,14 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 pt0, pt1 = calculate_pt(y_pred, y_true)
                 wce = weighted_cross_entropy(y_pred, y_true)
         else:
-            y_true = tf.cast(y_true, tf_precision)            
-            reconstruction_loss = tf.reduce_mean(tf.square(tf.subtract(y_true,y_pred)), name="reconstruction_loss") #RR 
+            print("ERROR loss type unknown:", loss_type, "Possible values: FL, CE, MSE")
 
-        cost = tf.reduce_mean(tf.add(reconstruction_loss,tf.multiply(beta, sparsity_loss)), name = "cost") #RR simplified equation
-        
+        cost = tf.add(reconstruction_loss,tf.multiply(beta, sparsity_loss))
+        #https://stackoverflow.com/questions/37107223/how-to-add-regularizations-in-tensorflow
+        reg_loss = tf.losses.get_regularization_loss()
+        reg_loss = tf.where(tf.is_nan(reg_loss), tf.zeros_like(reg_loss), reg_loss) #deal with nans if models jump too quickly to zero
+        cost = tf.add(cost, reg_loss, name = "cost")
+
     tf.summary.scalar('reconstruction_loss_MSE', reconstruction_loss)
     tf.summary.scalar("final_cost", cost)
 
@@ -1464,12 +1460,12 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
         
         if(save_summaries==True):
             if(verbose>1):
-                train_args = [merged,optimizer, cost, accuracy, reconstruction_loss, sparsity_loss, rho_hat, mygamma_0, mygamma_1, ce0, ce1,pt0, pt1, wce, y_pred]
+                train_args = [merged,optimizer, cost, accuracy, reconstruction_loss, sparsity_loss, rho_hat, mygamma_0, mygamma_1, ce0, ce1,pt0, pt1, wce, y_pred, reg_loss]
             else:
                 train_args = [merged,optimizer, cost, accuracy, reconstruction_loss, y_pred]
         else:
             if(verbose>1):
-                train_args = [optimizer, cost, accuracy, reconstruction_loss, sparsity_loss, rho_hat, mygamma_0, mygamma_1, ce0, ce1, pt0, pt1, wce, y_pred]
+                train_args = [optimizer, cost, accuracy, reconstruction_loss, sparsity_loss, rho_hat, mygamma_0, mygamma_1, ce0, ce1, pt0, pt1, wce, y_pred, reg_loss]
             else:
                 if(calculate_r2_per_epoch==True):
                     train_args = [optimizer, cost, accuracy, reconstruction_loss, y_pred]
@@ -1647,14 +1643,14 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
 
                     if(save_summaries==True):
                         if(verbose>1):
-                            summary, _, c, a, rl, sl, rh, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = my_result
+                            summary, _, c, a, rl, sl, rh, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy, myrg = my_result
                         else:
                             summary, _, c, a, rl, myy = my_result
                         train_writer.add_run_metadata(run_metadata, 'k%03d-step%03d-batch%04d' % (ki, epoch, i) )
                         train_writer.add_summary(summary, epoch)
                     else:
                         if(verbose>1):
-                            _, c, a, rl, sl, rh, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy = my_result
+                            _, c, a, rl, sl, rh, g0, g1, myce0, myce1,mypt0, mypt1, mywce, myy, myrg = my_result
                         else:
                             if(calculate_r2_per_epoch==True):
                                 _, c, a, rl, myy = my_result
@@ -1693,9 +1689,10 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                     avg_a += a/total_batch
                     
                 avg_rl += rl/total_batch
-                c_tmp=c/total_batch
-                epoch_cost+=c_tmp
-                avg_cost+=c_tmp/window
+                if(c>0):
+                    c_tmp=c/total_batch
+                    epoch_cost+=c_tmp
+                    avg_cost+=c_tmp/window
                 if(verbose>1 and i==0):
                     print("batch cost c:",c, "Sparsity loss:", sl, "rho_hat range:", np.min(rh), np.max(rh))
 
@@ -1778,6 +1775,7 @@ def run_autoencoder(learning_rate, training_epochs, l1_val, l2_val, act_val, bet
                 print("wce:", mywce)
                 print("fl:", rl)
                 print("myy:", myy)
+                print("myrg:", myrg)
             else:
                 if(avg_r2 != 'DISABLED'):
                     avg_r2 = np.round(avg_r2, 6)
