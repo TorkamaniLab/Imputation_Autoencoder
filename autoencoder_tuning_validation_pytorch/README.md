@@ -53,7 +53,7 @@ CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf \
 
 ## Train the models
 
-To run training, just execute the command DSAE_TORCH_ARG.py following the example listed bellow. For quick testing, only --input, --min_mask, and --max_mask are required (the hyperparameters will then be set to their default values).
+To run training, just execute the script DSAE_TORCH_ARG.py following the example listed bellow. For quick testing, only --input, --min_mask, and --max_mask are required (the hyperparameters will then be set to their default values).
 For example:
 ```
 CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf --min_mask 0.8 --max_mask 0.99
@@ -69,7 +69,7 @@ After debugging, making sure it runs, you can play with the hyperparamters:
 ```
 CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH.py \
 --input examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 \
---min_mask 0.80 --max_mask 0.99755620723362658846 --model_id model_1 \
+--min_mask 0.80 --max_mask 0.99755620723362658846 --model_id best_model \
 --l1 1e-07 --l1 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 --disable_alpha 1 \
 --learn_rate 0.001 --activation leakyrelu --optimizer rmsprop --loss_type FL \
 --n_layers 8 --size_ratio 0.7 --decay_rate 0.5
@@ -80,6 +80,8 @@ The outputs will be trained model and parameters (used for inference later), lis
 ls examples/IMPUTATOR_HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1/
 best_model_param.py  best_model.pth
 ```
+
+Repeat these steps for all the different hyperparameters you want to test and all VCFs you want to train, making sure you change --model_id argment value to not overwrite your previous model.
 
 For more details use --help:
 ```
