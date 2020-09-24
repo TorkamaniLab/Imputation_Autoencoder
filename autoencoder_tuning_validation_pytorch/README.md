@@ -35,12 +35,20 @@ The results are 100_random_hyperparameters.tsv (hyperparameter table) and 100_ra
 Use the generated output command template file (100_random_hyperparameters.sh) to build your command, just replacing <my_GPU_id>,  <my_input_file>,  <my_min_mask>, <my_max_mask> by their respective desired values. 
 For example, this line from 100_random_hyperparameters.sh:
 ```
-CUDA_VISIBLE_DEVICES=<my_GPU_id> python3 DSAE_TORCH_ARG.py --input <my_input_file> --min_mask <my_min_mask> --max_mask <my_max_mask> --model_id model_1 --l1 1e-07 --l1 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 --disable_alpha 1 --learn_rate 0.001 --activation leakyrelu --optimizer rmsprop --loss_type FL --n_layers 8 --size_ratio 0.7 --decay_rate 0.5
+CUDA_VISIBLE_DEVICES=<my_GPU_id> python3 DSAE_TORCH_ARG.py --input <my_input_file> \
+    --min_mask <my_min_mask> --max_mask <my_max_mask> --model_id model_1 \
+    --l1 1e-07 --l1 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 --disable_alpha 1 \
+    --learn_rate 0.001 --activation leakyrelu --optimizer rmsprop --loss_type FL \
+    --n_layers 8 --size_ratio 0.7 --decay_rate 0.5
 ```
 
 Would be replaced like this, for aiming on GPU 0, my_VMV_file.vcf as input, minimum mask of 0.8, and maximum mask of 0.99:
 ```
-CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf --min_mask 0.8 --max_mask 0.99 --model_id model_1 --l1 1e-07 --l1 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 --disable_alpha 1 --learn_rate 0.001 --activation leakyrelu --optimizer rmsprop --loss_type FL --n_layers 8 --size_ratio 0.7 --decay_rate 0.5
+CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf \
+    --min_mask 0.8 --max_mask 0.99 --model_id model_1 \
+    --l1 1e-07 --l1 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 \
+    --disable_alpha 1 --learn_rate 0.001 --activation leakyrelu \
+    --optimizer rmsprop --loss_type FL --n_layers 8 --size_ratio 0.7 --decay_rate 0.5
 ```
 
 ## Train the models
@@ -52,7 +60,9 @@ CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf --min_m
 ```
 Or a more realistic example:
 ```
-CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH.py --input examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 --min_mask 0.80 --max_mask 0.99755620723362658846
+CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH.py \
+--input examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 \
+--min_mask 0.80 --max_mask 0.99755620723362658846
 ```
 
 After debugging, making sure it runs, you can play with the hyperparamters:
@@ -140,7 +150,11 @@ python3 inference_function.py pos_file.1-5  genotype_array_file.vcf model_dir --
 A more specific example, on ARIC:
 ```
 cat examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 | grep -v "#" | cut -f1-5 > examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.1-5
-python3 inference_function.py examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.1-5  examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked examples/IMPUTATOR_HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 --output examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf --model_name best_model --use_gpu
+python3 inference_function.py examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.1-5 \
+    examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked \
+    examples/IMPUTATOR_HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 \
+    --output examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf \
+    --model_name best_model --use_gpu
 ```
 
 The result is the imputed VCF with the name you specified in the --output argument (e.g. examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf).
@@ -188,16 +202,31 @@ tabix -f -p examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.c
 ```
 Then run the accuracy calculator, for example:
 ```
-python3 Compare_imputation_to_WGS.py --wgs pos_file.1-5  --imputed  imputed_file.vcf --ref ref_file.vcf --ga ga_file.vcf --sout per_sample_output.tsv --vout per_variant_output.tsv
+python3 Compare_imputation_to_WGS.py --wgs pos_file.1-5 --imputed imputed_file.vcf \
+    --ref ref_file.vcf --ga ga_file.vcf --sout per_sample_output.tsv --vout per_variant_output.tsv
 ```
 More specific example:
 ```
-python3 Compare_imputation_to_WGS.py --wgs examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.gz  --imputed  examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz --ref examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.gz --ga examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz --sout examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz_per_sample_tsv --vout examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz_per_variant.tsv
+python3 Compare_imputation_to_WGS.py \
+    --wgs examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.gz  \
+    --imputed  examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz \
+    --ref examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.gz \
+    --ga examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz \
+    --sout examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz_per_sample_tsv \
+    --vout examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz_per_variant.tsv
 ```
 
-Results will show:
-Results per sample at: examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz_per_sample_tsv
-Results per variant at: examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz_per_variant.tsv
+Results will show...
+
+Results per sample at: 
+```
+examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz_per_sample_tsv
+```
+
+Results per variant at: 
+```
+examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz_per_variant.tsv
+```
 
 Use --help flag for additional help:
 ```
