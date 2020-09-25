@@ -275,4 +275,27 @@ optional arguments:
 
 ### 4. Plotting results
 
-    Adding section soon.
+You can adapt the plot_evaluation_results_per_variant.R to generate the accruacy metrics per MAF bin. The input file are the per variant metrics generated in pre previous step (--vout output files).
+```
+Rscript plot_evaluation_results_per_variant.R <vout.tsv>
+```
+
+For example:
+```
+Rscript plot_evaluation_results_per_variant.R examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz_per_variant.tsv
+```
+
+Multiple files can be specified at once using asterisk, for example:
+```
+Rscript plot_evaluation_results_per_variant.R ./plots/*per_variant.tsv
+```
+
+Only results with IMPUTED_MAF verus WGS_MAF correlation higher than 0.90 will be displayed (to avoid plotting artifacts).
+If you provide multiple --vout output files at one run, you will see multiple accuracy curves. 
+
+
+<img src="plots/p1.png" width="400">
+<img src="plots/p2.png" width="400">
+<img src="plots/p3.png" width="400">
+<img src="plots/p4.png" width="400">
+<img src="plots/p5.png" width="400">
