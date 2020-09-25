@@ -373,12 +373,15 @@ def get_optimizer(parameters, learning_rate, L2, optimizer_type='adam'):
         return torch.optim.Adam(parameters, lr=learning_rate, weight_decay=L2)
     elif optimizer_type == 'sgd':
         return torch.optim.SGD(parameters, lr=learning_rate, weight_decay=L2)
-    elif optimizer_type == 'rsmprop':
+    elif optimizer_type == 'rmsprop':
         return torch.optim.RMSprop(parameters, lr=learning_rate, weight_decay=L2)
     elif optimizer_type == 'adagrad':
         return torch.optim.Adagrad(parameters, lr=learning_rate, weight_decay=L2)
     elif optimizer_type == 'adadelta':
         return torch.optim.Adadelta(parameters, lr=learning_rate, weight_decay=L2)
+    else:
+        print("oprimizer not supported:", optimizer_type, "setting adam as default")
+        return torch.optim.Adam(parameters, lr=learning_rate, weight_decay=L2)
 
 def main(ar):
 
@@ -465,6 +468,9 @@ def main(ar):
         model_dir="./IMPUTATOR" + "_" + os.path.basename(ar.input)
     else:
         model_dir=arg.model_dir
+
+    if not os.path.exists(model_dir):
+        os.mkdir(model_dir)
     
     model_path = model_dir+'/'+ar.model_id+'.pth'
     print("Model save path:", model_path)
@@ -476,8 +482,6 @@ def main(ar):
         param_file.write("activation = \'"+act+"\'"+"\n")
     print("Inference parameters saved at:", hp_path)
     
-    if not os.path.exists(model_dir):
-        os.mkdir(model_dir)
 
     if(use_last_batch_for_validation==True):
         print("shape val (input):", y_val.shape)
@@ -503,7 +507,7 @@ def main(ar):
 
     #for focal loss
     if(disable_alpha == True):
-        alpha = None
+        alphas = None
     else:
         alphas = calculate_alpha(filtered_y_true)
     
@@ -626,8 +630,8 @@ if __name__ == "__main__":
     parser.add_argument("-O", "--optimizer", type=str, help="[adam, sgd, adadelta, adagrad] optimizer type", default='adam')
     parser.add_argument("-T", "--loss_type", type=str, help="[CE or FL] whether use CE for binary cross entropy or FL for focal loss", default='CE')
     parser.add_argument("-D", "--n_layers", type=int, help="[int, even number] total number of layers", default=4)
-    parser.add_argument("-S", "--size_ratio", type=int, help="[float(0-1]] size ratio for successive layer shrink (current layer size = previous layer size * size_ratio)", default=0.5)
-    parser.add_argument("-E", "--decay_rate", type=int, help="[float[0-1]] learning rate decay ratio (0 = decay deabled)", default=0.)
+    parser.add_argument("-S", "--size_ratio", type=float, help="[float(0-1]] size ratio for successive layer shrink (current layer size = previous layer size * size_ratio)", default=0.5)
+    parser.add_argument("-E", "--decay_rate", type=float, help="[float[0-1]] learning rate decay ratio (0 = decay deabled)", default=0.)
     parser.add_argument("-H", "--model_id", type=str, help="[int/str] model id or name to use for saving the model", default='best_model')
     parser.add_argument("-J", "--model_dir", type=str, help="[str] path/directory to save the model", default='auto')
     
