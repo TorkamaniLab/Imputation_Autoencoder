@@ -19,7 +19,7 @@ cp /mnt/stsi/p1/Torkamani_Lab/Internal/raqueld/example_files/autoencoder_pytorch
 tar -xvf examples.tar.gz
 ```
 
-## Making random hyperparameter combination sets
+## 1. Making random hyperparameter combination sets
 
 To generate a subset of N hyperparameters:
 ```
@@ -51,7 +51,16 @@ CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf \
     --optimizer rmsprop --loss_type FL --n_layers 8 --size_ratio 0.7 --decay_rate 0.5
 ```
 
-## Train the models
+I made a simple bash helper script that will do this replacement automatically:
+```
+usage: bash make_training_script_from_template.sh <template.sh> <input.vcf> <max_gpus>
+example: bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
+bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
+Training script generated at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh
+```
+
+
+## 2. Train the models
 
 To run training, just execute the script DSAE_TORCH_ARG.py following the example listed bellow. For quick testing, only --input, --min_mask, and --max_mask are required (the hyperparameters will then be set to their default values).
 For example:
@@ -140,9 +149,9 @@ optional arguments:
                         [str] path/directory to save the model
 ```
 
-## Model validation and evaluation
+## 3. Model validation and evaluation
 
-### Running inference
+### 3.1. Running inference
 
 For evaluating the model we must run inference on an independent dataset first, for example:
 ```
@@ -195,7 +204,7 @@ optional arguments:
                         (default=False)
 ```
 
-### Run evaluation of the imputed results
+### 3.2. Run evaluation of the imputed results
 
 Compress model and tabix it first, for example:
 ```
@@ -263,3 +272,7 @@ optional arguments:
                         _per_variant_results.txt suffix
   --xmode XMODE         Option for developers, print additional scores.
 ```
+
+### 4. Plotting results
+
+    Adding section soon.
