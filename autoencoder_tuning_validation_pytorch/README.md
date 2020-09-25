@@ -290,12 +290,12 @@ Multiple files can be specified at once using asterisk, for example:
 Rscript plot_evaluation_results_per_variant.R ./plots/*per_variant.tsv
 ```
 
-Only results with IMPUTED_MAF verus WGS_MAF correlation higher than 0.90 will be displayed (to avoid plotting artifacts).
+Only results with IMPUTED_MAF versus WGS_MAF correlation higher than 0.90 will be displayed (to avoid plotting artifacts).
 If you provide multiple --vout output files at one run, you will see multiple accuracy curves. 
 
 
-<img src="plots/p1.png" width="400">
-<img src="plots/p2.png" width="400">
-<img src="plots/p3.png" width="400">
-<img src="plots/p4.png" width="400">
-<img src="plots/p5.png" width="400">
+<img src="plots/p1.png" width="600">
+<img src="plots/p2.png" width="600">
+<img src="plots/p3.png" width="600">
+<img src="plots/p4.png" width="600">
+<img src="plots/p5.png" width="600">
