@@ -37,7 +37,7 @@ For example, this line from 100_random_hyperparameters.sh:
 ```
 CUDA_VISIBLE_DEVICES=<my_GPU_id> python3 DSAE_TORCH_ARG.py --input <my_input_file> \
     --min_mask <my_min_mask> --max_mask <my_max_mask> --model_id model_1 \
-    --l1 1e-07 --l1 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 --disable_alpha 1 \
+    --l1 1e-07 --l2 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 --disable_alpha 1 \
     --learn_rate 0.001 --activation leakyrelu --optimizer rmsprop --loss_type FL \
     --n_layers 8 --size_ratio 0.7 --decay_rate 0.5
 ```
@@ -46,7 +46,7 @@ Would be replaced like this, for aiming on GPU 0, my_VMV_file.vcf as input, mini
 ```
 CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf \
     --min_mask 0.8 --max_mask 0.99 --model_id model_1 \
-    --l1 1e-07 --l1 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 \
+    --l1 1e-07 --l2 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 \
     --disable_alpha 1 --learn_rate 0.001 --activation leakyrelu \
     --optimizer rmsprop --loss_type FL --n_layers 8 --size_ratio 0.7 --decay_rate 0.5
 ```
@@ -79,7 +79,7 @@ After debugging, making sure it runs, you can play with the hyperparamters:
 CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH.py \
 --input examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 \
 --min_mask 0.80 --max_mask 0.99755620723362658846 --model_id best_model \
---l1 1e-07 --l1 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 --disable_alpha 1 \
+--l1 1e-07 --l2 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 --disable_alpha 1 \
 --learn_rate 0.001 --activation leakyrelu --optimizer rmsprop --loss_type FL \
 --n_layers 8 --size_ratio 0.7 --decay_rate 0.5
 ```
