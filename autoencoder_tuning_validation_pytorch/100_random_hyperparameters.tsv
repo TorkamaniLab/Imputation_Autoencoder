@@ -1,9 +1,10 @@
-#model_id	l1	l1	beta	rho	gamma	disable_alpha	learn_rate	activation	optimizer	loss_type	n_layers	size_ratio	decay_rate
+#model_id	l1	l2	beta	rho	gamma	disable_alpha	learn_rate	activation	optimizer	loss_type	n_layers	size_ratio	decay_rate
 model_1	1e-07	1e-08	0.0001	0.05	0.0	1	0.001	leakyrelu	rmsprop	FL	8	0.7	0.5
 model_2	0.0	0.01	0.0	0.5	4.0	1	0.01	leakyrelu	rmsprop	CE	6	0.9	0.25
 model_3	0.1	1e-07	0.1	0.5	1.0	0	0.1	tanh	rmsprop	CE	8	1.0	0.25
 model_4	1e-05	0.01	1.0	0.5	5.0	1	1e-05	leakyrelu	adadelta	CE	8	0.8	0.95
 model_5	1e-07	1e-07	0.0	0.005	0.5	0	1e-05	leakyrelu	adagrad	FL	2	0.9	0.5
+model_5	0.0	1e-05	0.0	0.005	0.0	1	1e-04	relu	adam	CE	4	0.5	0.0
 model_6	1e-05	0.001	0.0001	0.05	1.0	0	0.001	sigmoid	rmsprop	CE	4	0.9	0.75
 model_7	0.0	1e-08	0.0	0.5	0.5	0	1e-05	leakyrelu	sgd	FL	4	0.6	0.0
 model_8	0.0	0.0	1.0	0.05	1.0	0	0.1	tanh	rmsprop	FL	4	0.9	0.5
@@ -65,7 +66,7 @@ model_63	0.0001	0.1	0.01	0.05	3.0	0	0.01	leakyrelu	adagrad	FL	6	1.0	0.75
 model_64	0.0	0.1	0.1	0.005	1.0	0	0.1	leakyrelu	sgd	CE	4	0.3	0.0
 model_65	0.001	0.0	0.0001	0.05	2.0	0	0.1	tanh	adadelta	CE	6	0.9	0.75
 model_66	0.1	0.0	0.0	0.25	0.0	0	1e-05	relu	adadelta	CE	4	0.4	0.25
-model_67	0.1	1e-08	0.01	0.05	4.0	1	0.0001	leakyrelu	rmsprop	FL	8	0.4	0.95
+model_67	0.0	1e-04	0.0	0.005	0.0	1	1e-03	relu	adam	CE	4	0.5	0.25
 model_68	0.01	0.1	1.0	0.005	5.0	1	0.1	leakyrelu	rmsprop	CE	2	0.5	0.25
 model_69	1e-06	0.0001	0.1	0.5	5.0	0	0.0001	sigmoid	adam	FL	8	0.4	0.95
 model_70	0.0001	1e-07	0.0001	0.005	5.0	1	0.0001	leakyrelu	adadelta	FL	2	0.9	0.5
