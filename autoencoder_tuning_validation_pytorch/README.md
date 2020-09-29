@@ -28,7 +28,7 @@ python3 pytorch_random_grid_maker.py <N>
 ```
 
 For example (100 hyperparameters):
-```
+```ruby
 python3 pytorch_random_grid_maker.py 100
 ```
 
@@ -53,9 +53,16 @@ CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf \
 ```
 
 I made a simple bash helper script that will do this replacement automatically:
+**usage: **
 ```
-usage: bash make_training_script_from_template.sh <template.sh> <input.vcf> <max_gpus>
-example: bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
+bash make_training_script_from_template.sh <template.sh> <input.vcf> <max_gpus>
+```
+**example: **
+```ruby
+bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
+```
+**test: **
+```
 bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
 
 Training script generated at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh
@@ -82,7 +89,7 @@ CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH_ARG.py \
 ```
 
 After debugging, making sure it runs, you can play with the hyperparamters:
-```
+```ruby
 CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH_ARG.py \
 --input examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 \
 --min_mask 0.80 --max_mask 0.99755620723362658846 --model_id best_model \
@@ -166,7 +173,7 @@ python3 inference_function.py pos_file.1-5  genotype_array_file.vcf model_dir --
 ```
 
 A more specific example, on ARIC:
-```
+```ruby
 cat examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 | grep -v "#" | cut -f1-5 > examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.1-5
 python3 inference_function.py examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.1-5 \
     examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked \
@@ -224,7 +231,7 @@ python3 Compare_imputation_to_WGS.py --wgs pos_file.1-5 --imputed imputed_file.v
     --ref ref_file.vcf --ga ga_file.vcf --sout per_sample_output.tsv --vout per_variant_output.tsv
 ```
 More specific example:
-```
+```ruby
 python3 Compare_imputation_to_WGS.py \
     --wgs examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.gz  \
     --imputed  examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz \
