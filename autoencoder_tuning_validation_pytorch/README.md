@@ -3,6 +3,7 @@
 - Python >=3.6
 - Pytorch >=1.6 (tested on 1.08 as well)
 - Samtools >=1.9
+- CUDA >= 10.2
 
 ## Example files:
 
