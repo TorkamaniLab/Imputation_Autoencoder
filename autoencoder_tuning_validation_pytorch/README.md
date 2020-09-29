@@ -75,7 +75,7 @@ For example:
 CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf --min_mask 0.8 --max_mask 0.99
 ```
 Or a more realistic example:
-```
+```ruby
 CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH_ARG.py \
 --input examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 \
 --min_mask 0.80 --max_mask 0.99755620723362658846
