@@ -44,7 +44,7 @@ CUDA_VISIBLE_DEVICES=<my_GPU_id> python3 DSAE_TORCH_ARG.py --input <my_input_fil
 ```
 
 Would be replaced like this, for aiming on GPU 0, my_VMV_file.vcf as input, minimum mask of 0.8, and maximum mask of 0.99:
-```
+```ruby
 CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf \
     --min_mask 0.8 --max_mask 0.99 --model_id model_1 \
     --l1 1e-07 --l2 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 \
