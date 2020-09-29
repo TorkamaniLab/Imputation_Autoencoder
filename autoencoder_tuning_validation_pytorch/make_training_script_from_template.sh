@@ -44,7 +44,7 @@ echo -e "Training script generated at $bashname"
 
 echo "example, parallel run automation:"
 echo "split -l 1 -a 3 -d $bashname $bashname."
-echo "for i in $bashname.[0-9][0-9][0-9]; do echo -e \"nohup bash $i 1> \$i.out 2> \$i.log\"; done > run.sh"
+echo "for i in $bashname.[0-9][0-9][0-9]; do echo -e \"nohup bash \$i 1> \$i.out 2> \$i.log\"; done > run.sh"
 echo "nohup parallel -j 4 < run.sh &"
 echo "or run each line of run.sh as a parallel background process (add &) with nohup"
 
