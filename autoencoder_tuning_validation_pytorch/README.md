@@ -56,7 +56,13 @@ I made a simple bash helper script that will do this replacement automatically:
 usage: bash make_training_script_from_template.sh <template.sh> <input.vcf> <max_gpus>
 example: bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
 bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
+
 Training script generated at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh
+example, parallel run automation:
+split -l 1 -a 3 -d HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.
+for i in HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.[0-9][0-9][0-9]; do echo -e "nohup bash $i 1> $i.out 2> $i.log"; done > run.sh
+nohup parallel -j 4 < run.sh &
+or run each line of run.sh as a parallel background process (add &) with nohup
 ```
 
 
@@ -69,14 +75,14 @@ CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf --min_m
 ```
 Or a more realistic example:
 ```
-CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH.py \
+CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH_ARG.py \
 --input examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 \
 --min_mask 0.80 --max_mask 0.99755620723362658846
 ```
 
 After debugging, making sure it runs, you can play with the hyperparamters:
 ```
-CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH.py \
+CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH_ARG.py \
 --input examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 \
 --min_mask 0.80 --max_mask 0.99755620723362658846 --model_id best_model \
 --l1 1e-07 --l2 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 --disable_alpha 1 \
