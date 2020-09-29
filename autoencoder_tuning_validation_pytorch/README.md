@@ -54,17 +54,17 @@ CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf \
 
 I made a simple bash helper script that will do this replacement automatically:  
 
-**usage: **  
+- usage: 
 ```
 bash make_training_script_from_template.sh <template.sh> <input.vcf> <max_gpus>
 ```
 
-**example: **  
+- example:
 ```ruby
 bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
 ```
 
-**test: **  
+- test:
 ```
 bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
 
