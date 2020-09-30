@@ -44,7 +44,7 @@ CUDA_VISIBLE_DEVICES=<my_GPU_id> python3 DSAE_TORCH_ARG.py --input <my_input_fil
 ```
 
 Would be replaced like this, for aiming on GPU 0, my_VMV_file.vcf as input, minimum mask of 0.8, and maximum mask of 0.99:
-```ruby
+```
 CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf \
     --min_mask 0.8 --max_mask 0.99 --model_id model_1 \
     --l1 1e-07 --l2 1e-08 --beta 0.0001 --rho 0.05 --gamma 0.0 \
@@ -85,14 +85,14 @@ For example:
 CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf --min_mask 0.8 --max_mask 0.99
 ```
 Or a more realistic example:
-```ruby
+```
 CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH_ARG.py \
 --input examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 \
 --min_mask 0.80 --max_mask 0.99755620723362658846
 ```
 
 After debugging, making sure it runs, you can play with the hyperparamters:
-```ruby
+```
 CUDA_VISIBLE_DEVICES=1 python3 DSAE_TORCH_ARG.py \
 --input examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 \
 --min_mask 0.80 --max_mask 0.99755620723362658846 --model_id best_model \
@@ -176,7 +176,7 @@ python3 inference_function.py pos_file.1-5  genotype_array_file.vcf model_dir --
 ```
 
 A more specific example, on ARIC:
-```ruby
+```
 cat examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 | grep -v "#" | cut -f1-5 > examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.1-5
 python3 inference_function.py examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.1-5 \
     examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked \
@@ -234,7 +234,7 @@ python3 Compare_imputation_to_WGS.py --wgs pos_file.1-5 --imputed imputed_file.v
     --ref ref_file.vcf --ga ga_file.vcf --sout per_sample_output.tsv --vout per_variant_output.tsv
 ```
 More specific example:
-```ruby
+```
 python3 Compare_imputation_to_WGS.py \
     --wgs examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.gz  \
     --imputed  examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz \
