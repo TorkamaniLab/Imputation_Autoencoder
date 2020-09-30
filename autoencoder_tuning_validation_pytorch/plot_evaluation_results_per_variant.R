@@ -17,8 +17,10 @@ func <- function(xx){
 }
 
 library(gtools)
-args <- mixedsort(args)
 
+if(length(args>1)){
+    args <- mixedsort(args)
+}
 
 
 i=1
@@ -26,14 +28,19 @@ data_to_plot <- read.table(args[1], header=TRUE, sep='\t', stringsAsFactors=FALS
 data_to_plot$file_name <- rep(basename(args[1]), nrow(data_to_plot))
 data_to_plot$Model <- rep(i, nrow(data_to_plot))
 
-for(tsv_file in args[-1]){
-   i=i+1
-   mydata <- read.table(tsv_file, header=TRUE, sep='\t', stringsAsFactors=FALSE)
-   mydata$file_name <- rep(basename(tsv_file), nrow(mydata))
-   mydata$Model <- rep(i, nrow(mydata))
+mydata <- data_to_plot
 
-   data_to_plot <- rbind(data_to_plot,mydata)
+if(length(args>1)){
 
+    for(tsv_file in args[-1]){
+       i=i+1
+       mydata <- read.table(tsv_file, header=TRUE, sep='\t', stringsAsFactors=FALSE)
+       mydata$file_name <- rep(basename(tsv_file), nrow(mydata))
+       mydata$Model <- rep(i, nrow(mydata))
+
+       data_to_plot <- rbind(data_to_plot,mydata)
+
+    }
 }
 
 data_to_plot <- subset(data_to_plot, WGS_MAF >= 0.005)
