@@ -28,7 +28,7 @@ python3 pytorch_random_grid_maker.py <N>
 ```
 
 For example (100 hyperparameters):
-```ruby
+```
 python3 pytorch_random_grid_maker.py 100
 ```
 
