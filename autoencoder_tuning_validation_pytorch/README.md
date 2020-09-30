@@ -60,7 +60,7 @@ bash make_training_script_from_template.sh <template.sh> <input.vcf> <max_gpus>
 ```
 
 - example:
-```ruby
+```
 bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
 ```
 
