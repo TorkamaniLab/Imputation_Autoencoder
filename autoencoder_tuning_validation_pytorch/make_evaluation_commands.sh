@@ -23,8 +23,8 @@ fi
 
 for imputed_path in $imputed_dir/*.vcf; do
 
-    bgzip -c $imputed_path > $imputed_path.gz
-    tabix -p vcf -f $imputed_path.gz
+    #bgzip -c $imputed_path > $imputed_path.gz
+    #tabix -p vcf -f $imputed_path.gz
 
     imputed_name=$(basename $imputed_path)
 
@@ -57,7 +57,7 @@ for imputed_path in $imputed_dir/*.vcf; do
     #echo $sout
     #echo $vout
 
-    cmd="python3 $script --wgs $wgs_path --imputed $imputed_path.gz --ga $ga_path --sout $sout --vout $vout"
+    cmd="bgzip -c $imputed_path > $imputed_path.gz; tabix -p vcf -f $imputed_path.gz; python3 $script --wgs $wgs_path --imputed $imputed_path.gz --ga $ga_path --sout $sout --vout $vout"
 
     echo $cmd
 done
