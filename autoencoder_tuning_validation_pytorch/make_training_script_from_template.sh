@@ -4,7 +4,7 @@ commands=$1
 
 if [ -z $2 ] || [ -z $3 ]; then
     echo "usage: bash make_training_script_from_template.sh template.sh input.vcf max_gpus"
-    echo "example: bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4"
+    echo "example: bash make_training_script_from_template.sh 100_random_hyperparameters.sh /raid/chr22/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4"
     exit
 fi
 
@@ -38,13 +38,29 @@ while read line; do
      fi
 
 done < $1 > $bashname
+echo
+echo -e "Sequential training script generated at $bashname"
+echo
+for i in $(seq 0 1 $n_gpus); do
+    if [ $i -eq $n_gpus ]; then
+        break
+    fi
+    grep "CUDA_VISIBLE_DEVICES=$i " $bashname > $bashname.GPU$i;
+    split -l 1 -a 3 -d $bashname.GPU$i $bashname.GPU${i}.
+    for j in $bashname.GPU${i}.[0-9][0-9][0-9]; do echo -e "bash $j 1> $j.out 2> $j.log"; done > $bashname.GPU${i}.parallel.sh
+    echo "Parallel training script for GPU $i at $bashname.GPU${i}.parallel.sh"
 
-echo -e "Training script generated at $bashname"
-
-
-echo "example, parallel run automation:"
-echo "split -l 1 -a 3 -d $bashname $bashname."
-echo "for i in $bashname.[0-9][0-9][0-9]; do echo -e \"nohup bash \$i 1> \$i.out 2> \$i.log\"; done > run.sh"
-echo "nohup parallel -j 4 < run.sh &"
-echo "or run each line of run.sh as a parallel background process (add &) with nohup"
-
+done
+echo
+echo "Parallel run automation example, if you want to distribute multiple jobs/models per GPU."
+echo "Let's say we are running 3 models per GPU (12 models total if you have 4 GPUs, 6 if you ave 2 GPUs, etc), for example, then the parallel runs would be like:"
+echo
+for i in $(seq 0 1 $n_gpus); do
+    if [ $i -eq $n_gpus ]; then
+        break
+    fi
+    echo "nohup parallel -j 3 < $bashname.GPU${i}.parallel.sh &"
+done
+echo
+echo "You should test different values for parallel's -j argument to find out what is the maximum number of parallel models you will be able to run in a single GPU before reaching the VRAM or CPU bottleneck."
+echo "If you are using a cluster with SLURM/TORQUE, put the \"parallel -j 3 < $bashname.<gpu_id>.parallel.sh\" inside a SLURM sbatch job script or TORQUE qsub script"

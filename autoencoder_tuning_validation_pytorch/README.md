@@ -67,14 +67,30 @@ bash make_training_script_from_template.sh 100_random_hyperparameters.sh example
 - test:
 ```
 bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
-
-Training script generated at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh
-example, parallel run automation:
-split -l 1 -a 3 -d HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.
-for i in HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.[0-9][0-9][0-9]; do echo -e "nohup bash $i 1> $i.out 2> $i.log"; done > run.sh
-nohup parallel -j 4 < run.sh &
-or run each line of run.sh as a parallel background process (add &) with nohup
 ```
+
+You will see this report giving instructions on how to run the models either sequentially or in parallel:
+```
+Sequential training script generated at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh
+
+Parallel training script for GPU 0 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU0.parallel.sh
+Parallel training script for GPU 1 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU1.parallel.sh
+Parallel training script for GPU 2 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU2.parallel.sh
+Parallel training script for GPU 3 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU3.parallel.sh
+```
+
+Parallel run automation example, if you want to distribute multiple jobs/models per GPU.
+Let's say we are running 3 models per GPU (12 models total if you have 4 GPUs, 6 if you ave 2 GPUs, etc), for example, then the parallel runs would be like:
+```
+nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU0.parallel.sh &
+nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU1.parallel.sh &
+nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU2.parallel.sh &
+nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU3.parallel.sh &
+```
+
+You should test different values for parallel's -j argument to find out what is the maximum number of parallel models you will be able to run in a single GPU before reaching the VRAM or CPU bottleneck.
+If you are using a cluster with SLURM/TORQUE, put the "parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.<gpu_id>.parallel.sh" inside a SLURM sbatch job script or TORQUE qsub script
+
 
 
 ## 2. Train the models
