@@ -27,7 +27,7 @@ torch.set_default_dtype(torch.float32)
 n_masks = 500 #how many different masking ratios to try before checkpoint
 #256 was the best batch size in TF1, test other batcsh size in pytorch
 #batch_size=128
-batch_size=256
+#batch_size=256
 use_last_batch_for_validation=False
 max_epochs= 20000 #maximum number of epochs if automatic stop criteria is not reached
 
@@ -449,6 +449,7 @@ def main(ar):
     optimizer_type = ar.optimizer
     act = ar.activation
     n_layers = ar.n_layers
+    batch_size = ar.batch_size
   
     #will only reach max epochs if early stop won't reach a plateau
     epochs=max_epochs
@@ -634,6 +635,7 @@ if __name__ == "__main__":
     parser.add_argument("-E", "--decay_rate", type=float, help="[float[0-1]] learning rate decay ratio (0 = decay deabled)", default=0.)
     parser.add_argument("-H", "--model_id", type=str, help="[int/str] model id or name to use for saving the model", default='best_model')
     parser.add_argument("-J", "--model_dir", type=str, help="[str] path/directory to save the model", default='auto')
+    parser.add_argument("-Z", "--batch_size", type=int, help="[int] path/directory to save the model", default=256)
     
     
     args = parser.parse_args()
