@@ -246,7 +246,7 @@ tabix -f -p vcf examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1
 ```
 Then run the accuracy calculator, for example:
 ```
-python3 Compare_imputation_to_WGS.py --wgs pos_file.1-5 --imputed imputed_file.vcf \
+python3 Compare_imputation_to_WGS.py --wgs wgs_file.vcf --imputed imputed_file.vcf \
     --ref ref_file.vcf --ga ga_file.vcf --sout per_sample_output.tsv --vout per_variant_output.tsv
 ```
 More specific example:
