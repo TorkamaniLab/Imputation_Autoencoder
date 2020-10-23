@@ -351,7 +351,7 @@ optional arguments:
 ```
 
 
-### 3.3. Run evaluation of the imputed results (multiple models, automated run example)
+### 3.4. Run evaluation of the imputed results (multiple models, automated run example)
 
 I made a command lime generator for the model evaluation function, so you don't need to run model by model manually.
 You can run the evaluation command generator by:
