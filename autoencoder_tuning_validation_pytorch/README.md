@@ -281,7 +281,7 @@ ls -l *.vcf
 IMPORTANT: when training multiple models it is important to keep model_id (i.e. model_1, model_2, ..., model_100) in the file name. Use the model id as a suffix like *.best_model.vcf. If you are running the automated scripts listed in this guide, they will take care of the model syntax and you don't need to worry about it.
 
 
-### 3.3. Run evaluation of the imputed results
+### 3.3. Run evaluation of the imputed results (single model example)
 
 Compress model and tabix it first, for example:
 ```
@@ -349,6 +349,62 @@ optional arguments:
                         _per_variant_results.txt suffix
   --xmode XMODE         Option for developers, print additional scores.
 ```
+
+
+### 3.3. Run evaluation of the imputed results (multiple models, automated run example)
+
+I made a command lime generator for the model evaluation function, so you don't need to run model by model manually.
+You can run the evaluation command generator by:
+
+
+```
+bash make_evaluation_commands.sh
+
+usage: bash make_inference_commands.sh <imputed_dir> <ga_dir> <wgs_dir> <out_dir>
+
+example: bash make_evaluation_commands.sh /raid/pytorch_random_search/inference_output /raid/ARIC/ARIC_chr22_ground_truth_5_phase_VMV_376a1_376a5_merged_AFFY6 /raid/ARIC/ARIC_chr22_ground_truth_5_phase_VMV_376a1_376a5_merged .
+
+<imputed_dir> directory where the inference results were generated (this script supports results from make_inference_commands.sh only!).
+<ga_dir> directory were the genotype array or "masked" input files are (files used as input by the inference function.
+<wgs_dir> directory where the ground truth WGS files are.
+<out_dir> directory where to save the evaluation results.
+
+```
+
+More specific example:
+
+```
+bash make_evaluation_commands.sh examples/inference_output examples/ examples/ evaluation_output
+Evaluation script generated at /raid/pytorch_random_search_github/evaluation_output/run_evaluation.sh
+```
+
+To run evaluations sequentially:
+```
+cd /raid/pytorch_random_search_github/evaluation_output; bash run_evaluation.sh
+```
+
+To run inferences in parallel:
+```
+cd /raid/pytorch_random_search_github/evaluation_output; parallel -j 4 < run_evaluation.sh
+```
+
+You will reports like this on the screen:
+```
+Processing  752 imputed samples
+Processing chunk: 1 Max rows per chunk: 10000
+1 Read imputed file time:  0.9586371723562479
+2 Chunking time:  0.0001266980543732643
+3 Calculation time:  1.8527713362127542
+4 Merging calculations per sample time:  0.06603083945810795
+Results per sample at: /raid/pytorch_random_search_github/evaluation_output/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.best_model.vcf_per_sample.tsv
+Results per variant at: /raid/pytorch_random_search_github/evaluation_output/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.best_model.vcf_per_variant.tsv
+Total run time (sec): 2.8827220732346177
+
+```
+
+The results are stored in the *_per_variant.tsv and *_per_sample.tsv files.
+
+IMPORTANT: when doing inference/evaluation across multiple models it is important to keep model_id (i.e. model_1, model_2, ..., model_100) in the file name. Use the model id as a suffix like *.best_model.vcf_per_variant.tsv. If you are running the automated scripts listed in this guide, they will take care of the file name syntax and you don't need to worry about it.
 
 ### 4. Plotting results
 
