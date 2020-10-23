@@ -437,7 +437,7 @@ For example:
 Rscript plot_evaluation_results_per_variant.R c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.best_model.vcf_per_variant.tsv
 ```
 
-The *.imputed.* and *.vcf_per_variant.tsv prefixes an suffixes are required to make this plotting script work. For example, this command would fail because of the wrong file naming syntax!!!
+The \*.imputed.\* and \*.vcf_per_variant.tsv prefixes an suffixes are required to make this plotting script work. For example, this command would fail because of the wrong file naming syntax!!!
 ```
 Rscript plot_evaluation_results_per_variant.R examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz_per_variant.tsv
 ```
