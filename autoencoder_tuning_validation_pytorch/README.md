@@ -52,48 +52,12 @@ CUDA_VISIBLE_DEVICES=0 python3 DSAE_TORCH_ARG.py --input my_VMV_file.vcf \
     --optimizer rmsprop --loss_type FL --n_layers 8 --size_ratio 0.7 --decay_rate 0.5
 ```
 
-I made a simple bash helper script that will do this replacement automatically:  
-
-- usage: 
-```
-bash make_training_script_from_template.sh <template.sh> <input.vcf> <max_gpus>
-```
-
-- example:
-```
-bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
-```
-
-- test:
-```
-bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
-```
-
-You will see this report giving instructions on how to run the models either sequentially or in parallel:
-```
-Sequential training script generated at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh
-
-Parallel training script for GPU 0 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU0.parallel.sh
-Parallel training script for GPU 1 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU1.parallel.sh
-Parallel training script for GPU 2 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU2.parallel.sh
-Parallel training script for GPU 3 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU3.parallel.sh
-```
-
-Parallel run automation example, if you want to distribute multiple jobs/models per GPU.
-Let's say we are running 3 models per GPU (12 models total if you have 4 GPUs, 6 if you ave 2 GPUs, etc), for example, then the parallel runs would be like:
-```
-nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU0.parallel.sh &
-nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU1.parallel.sh &
-nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU2.parallel.sh &
-nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU3.parallel.sh &
-```
-
-You should test different values for parallel's -j argument to find out what is the maximum number of parallel models you will be able to run in a single GPU before reaching the VRAM or CPU bottleneck.
-If you are using a cluster with SLURM/TORQUE, put the "parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.<gpu_id>.parallel.sh" inside a SLURM sbatch job script or TORQUE qsub script
-
+I made a simple bash helper script that will do this replacement automatically and run all training jobs (see section 2.2).  
 
 
 ## 2. Train the models
+
+### 2.1 Running training (single model example)
 
 To run training, just execute the script DSAE_TORCH_ARG.py following the example listed bellow. For quick testing, only --input, --min_mask, and --max_mask are required (the hyperparameters will then be set to their default values).
 For example:
@@ -182,6 +146,48 @@ optional arguments:
                         [str] path/directory to save the model
 ```
 
+### 2.2. Running training (multiple models, automated run example)
+
+I made a simple bash helper script that will generate the training commands automatically keeping a standardized file naming syntax.
+
+- usage: 
+```
+bash make_training_script_from_template.sh <template.sh> <input.vcf> <max_gpus>
+```
+
+- example:
+```
+bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
+```
+
+- test:
+```
+bash make_training_script_from_template.sh 100_random_hyperparameters.sh examples/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 4
+```
+
+You will see this report giving instructions on how to run the models either sequentially or in parallel:
+```
+Sequential training script generated at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh
+
+Parallel training script for GPU 0 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU0.parallel.sh
+Parallel training script for GPU 1 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU1.parallel.sh
+Parallel training script for GPU 2 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU2.parallel.sh
+Parallel training script for GPU 3 at HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU3.parallel.sh
+```
+
+Parallel run automation example, if you want to distribute multiple jobs/models per GPU.
+Let's say we are running 3 models per GPU (12 models total if you have 4 GPUs, 6 if you ave 2 GPUs, etc), for example, then the parallel runs would be like:
+```
+nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU0.parallel.sh &
+nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU1.parallel.sh &
+nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU2.parallel.sh &
+nohup parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.GPU3.parallel.sh &
+```
+
+You should test different values for parallel's -j argument to find out what is the maximum number of parallel models you will be able to run in a single GPU before reaching the VRAM or CPU bottleneck.
+If you are using a cluster with SLURM/TORQUE, put the "parallel -j 3 < HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1_100_random_hyperparameters.sh.<gpu_id>.parallel.sh" inside a SLURM sbatch job script or TORQUE qsub script
+
+
 ## 3. Model validation and evaluation
 
 ### 3.1. Running inference (single model example)
@@ -239,7 +245,7 @@ optional arguments:
 
 ### 3.2. Running inference (multiple models, automated run example)
 
-I made a command lime generator for the inference function, so you don't need to run model by model manually.
+I made a command line generator for the inference function, so you don't need to run model by model manually.
 You can run the inference command generator by:
 
 ```
@@ -404,16 +410,34 @@ Total run time (sec): 2.8827220732346177
 
 The results are stored in the *_per_variant.tsv and *_per_sample.tsv files.
 
-IMPORTANT: when doing inference/evaluation across multiple models it is important to keep model_id (i.e. model_1, model_2, ..., model_100) in the file name. Use the model id as a suffix like *.best_model.vcf_per_variant.tsv. If you are running the automated scripts listed in this guide, they will take care of the file name syntax and you don't need to worry about it.
+IMPORTANT: when doing inference/evaluation across multiple models it is important to keep model_id (i.e. model_1, model_2, ..., model_100) in the file name. Use the model id as a suffix like *.best_model.vcf_per_variant.tsv. If you are running the automated scripts listed in this guide, they will take care of the file name syntax and you don't need to worry about it. Please use --custom_names and --custom files if you have filenames with custom syntax if you have files that were not generated by steps 2.2, 3.2 and 3.4.
 
 ### 4. Plotting results
 
-You can adapt the plot_evaluation_results_per_variant.R to generate the accruacy metrics per MAF bin. The input file are the per variant metrics generated in pre previous step (--vout output files).
+WARNING! This tool only works if you followed steps 2.2, 3.2 and 3.4! It fails without the file naming syntax generated in those steps. Otherwise you have to use the custom flags only, no positional arguments.
+
+The input files are the per variant metrics generated in pre previous step (--vout output files).
 ```
-Rscript plot_evaluation_results_per_variant.R <vout.tsv>
+Rscript plot_evaluation_results_per_variant.R
+
+Usage:
+    Rscript plot_evaluation_results_per_variant.R <tsv_files> <options>
+Example:
+    Rscript plot_evaluation_results_per_variant.R ./evaluation_results/*_per_variant.tsv --threshold 0.95 --custom_files custom_file1.tsv custom_file2.tsv --custom_names custom_name1 custom_name2
+Positional arguments:
+    <tsv_files> Evaluation result file names(s), multiple files supported.
+Options (all optional):
+    --threshold [float]: Minimum correlation threshold (WGS vs imputed MAF correl) between -1 and 1, default=0.90
+    --custom_files [str, list]: list of custom evaluation results from other tools
+    --custom_names [str, list]: list of names for the custom evaluation results from other tools (i.e. minimac)
 ```
 
 For example:
+```
+Rscript plot_evaluation_results_per_variant.R c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.best_model.vcf_per_variant.tsv
+```
+
+The *.imputed.* and *.vcf_per_variant.tsv prefixes an suffixes are required to make this plotting script work. For example, this command would fail because of the wrong file naming syntax!!!
 ```
 Rscript plot_evaluation_results_per_variant.R examples/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.gz.best_model.vcf.gz_per_variant.tsv
 ```
@@ -423,7 +447,7 @@ Multiple files can be specified at once using asterisk, for example:
 Rscript plot_evaluation_results_per_variant.R ./plots/*per_variant.tsv
 ```
 
-Only results with IMPUTED_MAF versus WGS_MAF correlation higher than 0.90 will be displayed (to avoid plotting artifacts).
+Only results with IMPUTED_MAF versus WGS_MAF correlation higher than 0.90 will be displayed (to avoid plotting artifacts). But you can change that threshold using --threshold option.
 If you provide multiple --vout output files at one run, you will see multiple accuracy curves. 
 
 

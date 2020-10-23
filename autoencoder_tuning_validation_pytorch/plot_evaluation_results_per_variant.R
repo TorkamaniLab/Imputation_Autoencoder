@@ -1,15 +1,62 @@
 
 library(ggplot2)
+library(stringr)
+library(argparse)
 
+args <- commandArgs(trailingOnly=TRUE)
 
-args = commandArgs(trailingOnly=TRUE)
+print_help <- function(){
 
-if(length(args)==0){
-    print("Usage: Rscript plot_evaluation_results_per_variant.R <tsv_files>")
-    print("Example: Rscript plot_evaluation_results_per_variant.R ./evaluation_results/*_per_variant.tsv")
-
+    cat("Usage:\n")
+    cat("    Rscript plot_evaluation_results_per_variant.R <tsv_files> <options>\n")
+    cat("Example:\n")
+    cat("    Rscript plot_evaluation_results_per_variant.R ./evaluation_results/*_per_variant.tsv --threshold 0.90 --custom_files custom_file1.tsv custom_file2.tsv --custom_names custom_name1 custom_name2\n")
+    cat("Positional arguments:\n")
+    cat("    <tsv_files> Evaluation result file names(s), multiple files supported.\n")
+    cat("Options (all optional):\n")
+    cat("    --threshold [float]: Minimum correlation threshold (WGS vs imputed MAF correl) between -1 and 1, default=0.90\n")
+    cat("    --custom_files [str, list]: list of custom evaluation results from other tools\n")
+    cat("    --custom_names [str, list]: list of names for the custom evaluation results from other tools (i.e. minimac)\n")
     q()
+
+
+
+
 }
+if(length(args)==0){
+    print_help()
+}
+
+
+parser <- ArgumentParser(description='Plot model evaluation results.')
+
+parser$add_argument('tsv_files', metavar='N', type="character", nargs='+',help="evaluation result file names(s).")
+parser$add_argument('--threshold', type="double", default=0.90, help="Minimum correlation threshold (WGS vs imputed MAF correl) [default %default]")
+
+
+if("--custom_files" %in% args){
+    parser$add_argument('--custom_files', metavar='custom_files', type="character", nargs='+', default=NULL, help="list of custom evaluation results from other tools")
+    parser$add_argument('--custom_names', metavar='custom_files', type="character", nargs='+', default=NULL, help="list of names for the custom evaluation results from other tools (i.e. minimac)")
+}
+
+
+parsed_args <- parser$parse_args(args)
+
+custom_names <- NULL
+custom_files <- NULL
+if("--custom_files" %in% args){
+    custom_names <- parsed_args$custom_names
+    custom_files <- parsed_args$custom_files
+}
+
+args <- parsed_args$tsv_files
+threshold <- parsed_args$threshold
+
+
+print(parsed_args)
+
+
+
 
 require(plyr)
 func <- function(xx){
@@ -24,30 +71,49 @@ if(length(args>1)){
 
 
 i=1
+model_id<-str_match(args[1], ".imputed.\\s*(.*?)\\s*.vcf_per_variant.tsv")[,2]
+print(paste0("Processing model with model id: ",model_id))
+
 data_to_plot <- read.table(args[1], header=TRUE, sep='\t', stringsAsFactors=FALSE)
 data_to_plot$file_name <- rep(basename(args[1]), nrow(data_to_plot))
-data_to_plot$Model <- rep(i, nrow(data_to_plot))
+data_to_plot$Model <- rep(model_id, nrow(data_to_plot))
 
 mydata <- data_to_plot
 
 if(length(args>1)){
 
     for(tsv_file in args[-1]){
+       model_id<-str_match(tsv_file, ".imputed.\\s*(.*?)\\s*.vcf_per_variant.tsv")[,2]
+       print(paste0("Processing model with model id: ",model_id))
        i=i+1
        mydata <- read.table(tsv_file, header=TRUE, sep='\t', stringsAsFactors=FALSE)
        mydata$file_name <- rep(basename(tsv_file), nrow(mydata))
-       mydata$Model <- rep(i, nrow(mydata))
+       mydata$Model <- rep(model_id, nrow(mydata))
 
        data_to_plot <- rbind(data_to_plot,mydata)
 
     }
 }
 
+
+if(length(custom_files)>0){
+    for(i in c(1:length(custom_files))){
+        model_id <- custom_names[i]
+        mydata <- read.table(custom_files[i], header=TRUE, sep='\t', stringsAsFactors=FALSE)
+        mydata$file_name <- rep(basename(custom_files[i]), nrow(mydata))
+        mydata$Model <- rep(model_id, nrow(mydata))
+        data_to_plot <- rbind(data_to_plot,mydata)
+    }
+
+
+}
+
+
 data_to_plot <- subset(data_to_plot, WGS_MAF >= 0.005)
 
 correls <- as.data.frame(ddply(data_to_plot, .(Model), func))
 
-best <- subset(correls, COR > 0.9)
+best <- subset(correls, COR > threshold)
 
 best
 
