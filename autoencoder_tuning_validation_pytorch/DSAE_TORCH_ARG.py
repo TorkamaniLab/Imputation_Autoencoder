@@ -29,8 +29,8 @@ n_masks = 500 #how many different masking ratios to try before checkpoint
 #batch_size=128
 #batch_size=256
 use_last_batch_for_validation=False
-#max_epochs= 20000 #maximum number of epochs if automatic stop criteria is not reached
-max_epochs= 50000 #maximum number of epochs if automatic stop criteria is not reached
+max_epochs= 20000 #maximum number of epochs if automatic stop criteria is not reached
+#max_epochs= 50000 #maximum number of epochs if automatic stop criteria is not reached
 
 ############data encoding options
 encode_inputs_to_binomial=True #True: output layer will hav same format as output, False: use dosages directly as input (fewer nodes, less memory)
