@@ -3,7 +3,7 @@ log=configure_logging.py
 util=genotype_conversions.py
 train=DSAE_TORCH_ARG.py
 
-if [ -z $out_dir ]; then
+if [ -z $4 ]; then
 
     echo "usage: bash make_inference_commands.sh <model_dir> <pos_file.1-5> <ga_dir> <out_dir>"
     echo "example: bash make_inference_commands.sh /raid/pytorch_random_search/models/IMPUTATOR_HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 /raid/chr22/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.1-5 /raid/ARIC/ARIC_chr22_ground_truth_5_phase_VMV_376a1_376a5_merged_AFFY6 ./inference_output"
