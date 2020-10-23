@@ -450,9 +450,16 @@ Rscript plot_evaluation_results_per_variant.R ./plots/*per_variant.tsv
 Only results with IMPUTED_MAF versus WGS_MAF correlation higher than 0.90 will be displayed (to avoid plotting artifacts). But you can change that threshold using --threshold option.
 If you provide multiple --vout output files at one run, you will see multiple accuracy curves. 
 
-
 <img src="plots/p1.png" width="600">
 <img src="plots/p2.png" width="600">
 <img src="plots/p3.png" width="600">
 <img src="plots/p4.png" width="600">
 <img src="plots/p5.png" width="600">
+
+Example using custom evaluation results and model names from external tools, and specifying --threshold option:
+
+```
+Rscript plot_evaluation_results_per_variant.R plots/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_8.vcf_per_variant.tsv --custom_files plots/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_1.vcf_per_variant.tsv plots/c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_2.vcf_per_variant.tsv --custom_names my_model_A my_model_B --threshold 0.90
+```
+
+<img src="plots/p1_custom.png" width="600">
