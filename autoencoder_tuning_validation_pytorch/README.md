@@ -184,7 +184,7 @@ optional arguments:
 
 ## 3. Model validation and evaluation
 
-### 3.1. Running inference
+### 3.1. Running inference (single model example)
 
 For evaluating the model we must run inference on an independent dataset first, for example:
 ```
@@ -237,7 +237,51 @@ optional arguments:
                         (default=False)
 ```
 
-### 3.2. Run evaluation of the imputed results
+### 3.2. Running inference (multiple models, automated run example)
+
+I made a command lime generator for the inference function, so you don't need to run model by model manually.
+You can run the inference command generator by:
+
+```
+bash make_inference_commands.sh
+
+usage: bash make_inference_commands.sh <model_dir> <pos_file.1-5> <ga_dir> <out_dir>
+
+example: bash make_inference_commands.sh /raid/pytorch_random_search/models/IMPUTATOR_HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 /raid/chr22/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.1-5 /raid/ARIC/ARIC_chr22_ground_truth_5_phase_VMV_376a1_376a5_merged_AFFY6 ./inference_output
+
+<model_dir>: directory where the model files (*.pth) are.
+<pos_file.1-5>: position file, first 5 columns of the VCF file used for training (see README.md section 3.1)
+<ga_dir>: genotype array (or "masked") directory.
+<out_dir>: output directory.
+
+```
+
+More specific example:
+```
+bash make_inference_commands.sh examples/IMPUTATOR_HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1 /raid/chr22/HRC.r1-1.EGA.GRCh37.chr22.haplotypes.38708556-38866010.vcf.VMV1.1-5 /raid/ARIC/ARIC_chr22_ground_truth_5_phase_VMV_376a1_376a5_merged_AFFY6 examples/inference_output
+Inference script generated at /raid/pytorch_random_search_github/examples/inference_output/run_inference.sh
+```
+
+To run inferences sequentially:
+```
+cd examples/inference_output; bash run_inference.sh
+```
+
+To run inferences in parallel:
+```
+cd examples/inference_output; parallel -j 4 < run_inference.sh
+```
+
+You should be able to see the new vcf files generated (in this example we are showing just one file, but you will have as many files as the number of models you trained):
+```
+ls -l *.vcf
+-rw-rw-r-- 1 raqueld raqueld 90865666 Oct 23 10:43 c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.best_model.vcf
+```
+
+IMPORTANT: when training multiple models it is important to keep model_id (i.e. model_1, model_2, ..., model_100) in the file name. Use the model id as a suffix like *.best_model.vcf. If you are running the automated scripts listed in this guide, they will take care of the model syntax and you don't need to worry about it.
+
+
+### 3.3. Run evaluation of the imputed results
 
 Compress model and tabix it first, for example:
 ```
