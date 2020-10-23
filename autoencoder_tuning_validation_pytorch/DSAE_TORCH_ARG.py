@@ -29,7 +29,8 @@ n_masks = 500 #how many different masking ratios to try before checkpoint
 #batch_size=128
 #batch_size=256
 use_last_batch_for_validation=False
-max_epochs= 20000 #maximum number of epochs if automatic stop criteria is not reached
+#max_epochs= 20000 #maximum number of epochs if automatic stop criteria is not reached
+max_epochs= 50000 #maximum number of epochs if automatic stop criteria is not reached
 
 ############data encoding options
 encode_inputs_to_binomial=True #True: output layer will hav same format as output, False: use dosages directly as input (fewer nodes, less memory)
@@ -450,7 +451,7 @@ def main(ar):
     act = ar.activation
     n_layers = ar.n_layers
     batch_size = ar.batch_size
-  
+
     #will only reach max epochs if early stop won't reach a plateau
     epochs=max_epochs
     
@@ -625,7 +626,7 @@ if __name__ == "__main__":
     parser.add_argument("-B", "--beta", type=float, help="[float] Beta scaling factor for sparsity loss (KL divergence)", default=0.)
     parser.add_argument("-R", "--rho", type=float, help="[float] Rho desired mean activation for sparsity loss (KL divergence)", default=0.05)
     parser.add_argument("-G", "--gamma", type=float, help="[float] gamma modulating factor for focal loss", default=0.)
-    parser.add_argument("-A", "--disable_alpha", type=bool, help="[0 or 1]=[false or true] whether disable alpha scaling factor for focal loss", default=0)
+    parser.add_argument("-A", "--disable_alpha", type=int, help="[0 or 1]=[false or true] whether disable alpha scaling factor for focal loss", default=0)
     parser.add_argument("-C", "--learn_rate", type=float, help="[float] learning rate", default=0.001)
     parser.add_argument("-F", "--activation", type=str, help="[relu, leakyrelu, tanh, sigmoid] activation function type", default='relu')
     parser.add_argument("-O", "--optimizer", type=str, help="[adam, sgd, adadelta, adagrad] optimizer type", default='adam')
@@ -636,7 +637,7 @@ if __name__ == "__main__":
     parser.add_argument("-H", "--model_id", type=str, help="[int/str] model id or name to use for saving the model", default='best_model')
     parser.add_argument("-J", "--model_dir", type=str, help="[str] path/directory to save the model", default='auto')
     parser.add_argument("-Z", "--batch_size", type=int, help="[int] path/directory to save the model", default=256)
-    
+
     
     args = parser.parse_args()
     print("ARGUMENTS", args)
