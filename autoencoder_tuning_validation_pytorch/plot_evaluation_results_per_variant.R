@@ -87,6 +87,7 @@ if(length(args>1)){
        print(paste0("Processing model with model id: ",model_id))
        i=i+1
        mydata <- read.table(tsv_file, header=TRUE, sep='\t', stringsAsFactors=FALSE)
+       mydata$REF_MAF <- NULL
        mydata$file_name <- rep(basename(tsv_file), nrow(mydata))
        mydata$Model <- rep(model_id, nrow(mydata))
 
@@ -100,6 +101,7 @@ if(length(custom_files)>0){
     for(i in c(1:length(custom_files))){
         model_id <- custom_names[i]
         mydata <- read.table(custom_files[i], header=TRUE, sep='\t', stringsAsFactors=FALSE)
+        mydata$REF_MAF <- NULL
         mydata$file_name <- rep(basename(custom_files[i]), nrow(mydata))
         mydata$Model <- rep(model_id, nrow(mydata))
         data_to_plot <- rbind(data_to_plot,mydata)
