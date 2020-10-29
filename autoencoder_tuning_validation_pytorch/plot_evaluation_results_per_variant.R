@@ -111,7 +111,7 @@ if(length(custom_files)>0){
 }
 
 
-data_to_plot <- subset(data_to_plot, WGS_MAF >= 0.005)
+data_to_plot <- subset(data_to_plot, WGS_MAF >= 0.001)
 
 correls <- as.data.frame(ddply(data_to_plot, .(Model), func))
 
@@ -119,8 +119,12 @@ best <- subset(correls, COR > threshold)
 
 best
 
-breaks <- c(0,0.005,0.05,0.1,0.2,0.3,0.4,0.5)
-bins <- c("[0-0.005)","[0.005-0.05)", "[0.005-0.1)", "[0.1-0.2)", "[0.2-0.3)", "[0.3-0.4)","[0.4-0.5)")
+breaks <- c(0,0.001,0.005,0.01,0.05,0.1,0.2,0.3,0.4,0.5)
+#breaks <- c(0,0.001,0.005,0.01,0.05,0.1,0.5)
+
+bins <- c("(0-0.001)", "[0.001-0.005)","[0.005-0.01)", "[0.01-0.05)", "[0.05-0.1)", "[0.1-0.2)", "[0.2-0.3)", "[0.3-0.4)","[0.4-0.5)")
+#bins <- c("(0-0.001)", "[0.001-0.005)","[0.005-0.01)", "[0.01-0.05)", "[0.05-0.1)", "[0.1-0.5)")
+
 bin_tags <- cut(data_to_plot$WGS_MAF, 
                   breaks=breaks, 
                   include.lowest=TRUE, 
