@@ -29,8 +29,6 @@ n_masks = 500 #how many different masking ratios to try before checkpoint
 #batch_size=128
 #batch_size=256
 use_last_batch_for_validation=False
-max_epochs= 20000 #maximum number of epochs if automatic stop criteria is not reached
-#max_epochs= 50000 #maximum number of epochs if automatic stop criteria is not reached
 
 ############data encoding options
 encode_inputs_to_binomial=True #True: output layer will hav same format as output, False: use dosages directly as input (fewer nodes, less memory)
@@ -453,8 +451,8 @@ def main(ar):
     batch_size = ar.batch_size
 
     #will only reach max epochs if early stop won't reach a plateau
-    epochs=max_epochs
-    
+    max_epochs=ar.max_epochs
+
     #SPARSE AUTOENCODER
     autoencoder = Autoencoder(input_dim=ni, output_dim=no, n_layers=n_layers, size_ratio=size_ratio, activation=act).cuda()
     
@@ -636,7 +634,8 @@ if __name__ == "__main__":
     parser.add_argument("-E", "--decay_rate", type=float, help="[float[0-1]] learning rate decay ratio (0 = decay deabled)", default=0.)
     parser.add_argument("-H", "--model_id", type=str, help="[int/str] model id or name to use for saving the model", default='best_model')
     parser.add_argument("-J", "--model_dir", type=str, help="[str] path/directory to save the model", default='auto')
-    parser.add_argument("-Z", "--batch_size", type=int, help="[int] path/directory to save the model", default=256)
+    parser.add_argument("-Z", "--batch_size", type=int, help="[int] batch size", default=256)
+    parser.add_argument("-X", "--max_epochs", type=int, help="[int] maximum number of epochs if early stop criterion is not reached", default=20000)
 
     
     args = parser.parse_args()
