@@ -18,6 +18,7 @@ print_help <- function(){
     cat("    --custom_files [str, list]: list of custom evaluation results from other tools\n")
     cat("    --custom_names [str, list]: list of names for the custom evaluation results from other tools (i.e. minimac)\n")
     cat("    --custom_title [str]: optional main title for the plots\n")
+    cat("    --out_dir [str]: optional optional output directory where to save de plots (default is .)\n")
     q()
 
 
@@ -34,6 +35,7 @@ parser <- ArgumentParser(description='Plot model evaluation results.')
 parser$add_argument('tsv_files', metavar='N', type="character", nargs='+',help="evaluation result file names(s).")
 parser$add_argument('--threshold', type="double", default=0.90, help="Minimum correlation threshold (WGS vs imputed MAF correl) [default %default]")
 parser$add_argument('--custom_title', metavar='custom_title', type="character", default='', help="optional main title for the plots")
+parser$add_argument('--out_dir', metavar='out_dir', type="character", default='.', help="optional output directory where to save de plots (default is .)")
 
 
 if("--custom_files" %in% args){
@@ -57,7 +59,10 @@ threshold <- parsed_args$threshold
 
 print(parsed_args)
 
-
+if(dir.exists(file.path(parsed_args$out_dir)) == FALSE){
+    print(paste0("creating directory ", parsed_args$out_dir))
+    dir.create(parsed_args$out_dir)
+}
 
 
 require(plyr)
@@ -189,16 +194,6 @@ p3 <- ggplot(res, aes(x=MAF_bin, y=Mean_concordance, group=Model, color=Model)) 
     labs(subtitle = parsed_args$custom_title, color = "") +
     guides(col = guide_legend(nrow = 40))
 
-
-ggsave("p1.pdf", plot = p1, scale = 1, width = 15, height = 10, dpi = 300)
-ggsave("p2.pdf", plot = p2, scale = 1, width = 15, height = 10, dpi = 300)
-ggsave("p3.pdf", plot = p3, scale = 1, width = 15, height = 10, dpi = 300)
-
-ggsave("p1.png", plot = p1, scale = 1, width = 15, height = 10, dpi = 300)
-ggsave("p2.png", plot = p2, scale = 1, width = 15, height = 10, dpi = 300)
-ggsave("p3.png", plot = p3, scale = 1, width = 15, height = 10, dpi = 300)
-
-
 p4 <- ggplot(data_to_plot,aes(x=WGS_MAF, y=IMPUTED_MAF,col=Model))+
     geom_point(alpha=0.5) +
     geom_abline(intercept = 0, slope = 1.0) +
@@ -206,20 +201,23 @@ p4 <- ggplot(data_to_plot,aes(x=WGS_MAF, y=IMPUTED_MAF,col=Model))+
     labs(subtitle = parsed_args$custom_title, color = "") +
     guides(col = guide_legend(nrow = 40))
 
-
-ggsave("p4.pdf", plot = p4, scale = 1, width = 15, height = 10, dpi = 300)
-ggsave("p4.png", plot = p4, scale = 1, width = 15, height = 10, dpi = 300)
-
-
 data_to_plot2 <- as.data.frame(rbind(cbind(data_to_plot$IMPUTED_MAF, data_to_plot$Model), cbind(mydata$WGS_MAF, rep("WGS", nrow(mydata)))), stringsAsFactors = FALSE)
 names(data_to_plot2) <- c('MAF','Model')
 data_to_plot2$MAF <- as.numeric(data_to_plot2$MAF)
+
 p5 <- ggplot(data_to_plot2, aes(x=MAF, colour=Model)) +
     geom_density(aes(y = ..ndensity..)) +
     theme_classic(base_size = 15) +
     labs(subtitle = parsed_args$custom_title, color = "") +
     guides(col = guide_legend(nrow = 40))
 
+plots <- list(p1,p2,p3,p4,p5)
 
-ggsave("p5.pdf", plot = p5, scale = 1, width = 15, height = 10, dpi = 300)
-ggsave("p5.png", plot = p5, scale = 1, width = 15, height = 10, dpi = 300)
+for(i in 1:5){
+    for(suffix in c(".pdf", ".png")){
+        plot_name <- paste0("p",i,suffix)
+        file_name <- file.path(parsed_args$out_dir, plot_name)
+        print(paste0("Saving plot ",i, " in ", file_name))
+        ggsave(file_name, plot = plots[[i]], scale = 1, width = 15, height = 10, dpi = 300)
+    }
+}
