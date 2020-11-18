@@ -33,7 +33,7 @@ if [ ! -f ${out_dir}/${script}  ]; then
     cp $train $out_dir/
 fi
 
-region=$(basename $pos | sed -e 's/.*haplotypes\.//g' | sed -e 's/\..*//g')
+region=$(basename $pos | sed -e 's/.*haplotypes\.//g' | sed -e 's/\.VMV1.*//g')
 chr=$(basename $pos | sed -e 's/.*\.chr/chr/g' | sed -e 's/\..*//g')
 #echo $region
 #echo $chr
