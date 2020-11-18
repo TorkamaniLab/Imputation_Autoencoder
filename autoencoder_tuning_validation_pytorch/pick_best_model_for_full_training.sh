@@ -11,11 +11,15 @@ if [ -z $1 ] | [ -z $2 ] ; then
     exit
 fi
 
+
+model_list=$(cat $2 | sed -e 's/.*--model_id //g' | sed -e 's/ .*//g')
+pattern=$(echo $model_list | sed -e 's/ /\\\|/g')
+
 best=$(cat $1 | grep "^model" | sort -k2,2g | tail -n 1 | cut -f 1)
 
-cat $2 | grep -w $best | sed -e 's/--max_epochs .*/--max_epochs 50000/g' | sed -e "s/$best/${best}_F/g" > ${2}.best
+cat $2 | grep -w '${pattern}' | sed -e 's/--max_epochs .*/--max_epochs 50000/g' | sed -e "s/$best/${best}_F/g" > ${2}.best
 
 echo
 echo -e "Best model is $best, new full training model name: ${best}_F"
 echo -e "Full training script created at ${2}.best"
-
+echo
