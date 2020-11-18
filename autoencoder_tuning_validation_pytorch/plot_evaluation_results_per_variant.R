@@ -17,8 +17,8 @@ print_help <- function(){
     cat("    --threshold [float]: Minimum correlation threshold (WGS vs imputed MAF correl) between -1 and 1, default=0.90\n")
     cat("    --custom_files [str, list]: list of custom evaluation results from other tools\n")
     cat("    --custom_names [str, list]: list of names for the custom evaluation results from other tools (i.e. minimac)\n")
-    cat("    --custom_title [str]: optional main title for the plots\n")
-    cat("    --out_dir [str]: optional optional output directory where to save de plots (default is .)\n")
+    cat("    --custom_title [str]: main title for the plots\n")
+    cat("    --out_dir [str]: output directory where to save de plots (default is .)\n")
     q()
 
 
@@ -34,8 +34,8 @@ parser <- ArgumentParser(description='Plot model evaluation results.')
 
 parser$add_argument('tsv_files', metavar='N', type="character", nargs='+',help="evaluation result file names(s).")
 parser$add_argument('--threshold', type="double", default=0.90, help="Minimum correlation threshold (WGS vs imputed MAF correl) [default %default]")
-parser$add_argument('--custom_title', metavar='custom_title', type="character", default='', help="optional main title for the plots")
-parser$add_argument('--out_dir', metavar='out_dir', type="character", default='.', help="optional output directory where to save de plots (default is .)")
+parser$add_argument('--custom_title', metavar='custom_title', type="character", default='', help="main title for the plots")
+parser$add_argument('--out_dir', metavar='out_dir', type="character", default='.', help="output directory where to save de plots (default is .)")
 
 
 if("--custom_files" %in% args){
@@ -167,10 +167,27 @@ res <- data_to_plot %>% group_by(Model,MAF_bin) %>%
         ungroup %>%
         as.data.frame()
 
+overall_res <- data_to_plot %>% group_by(Model) %>%
+        summarise(Mean_r2 = mean(r2,na.rm=TRUE),
+                  SD_r2 = sd(r2, na.rm=TRUE),
+                  SE_r2 = se(r2, na.rm=TRUE),
+                  Mean_Fscore = mean(F.score,na.rm=TRUE),
+                  SD_Fscore = sd(F.score,na.rm=TRUE),
+                  SE_Fscore = se(F.score,na.rm=TRUE),
+                  Mean_concordance = mean(concordance_P0,na.rm=TRUE),
+                  SD_concordance = sd(concordance_P0,na.rm=TRUE),
+                  SE_concordance = se(concordance_P0,na.rm=TRUE)) %>%
+        ungroup %>%
+        as.data.frame()
+
+
+
 options(repr.plot.width = 15, repr.plot.height = 10)
+
 
 sorted_labels <- unique(mixedsort(as.character(res$Model)))
 res$Model <- factor(res$Model, levels = sorted_labels)
+overall_res$Model <- factor(overall_res$Model, levels = sorted_labels)
 
 
 p1 <- ggplot(res, aes(x=MAF_bin, y=Mean_r2, group=Model, color=Model)) +
@@ -211,6 +228,21 @@ p5 <- ggplot(data_to_plot2, aes(x=MAF, colour=Model)) +
     labs(subtitle = parsed_args$custom_title, color = "") +
     guides(col = guide_legend(nrow = 40))
 
+
+file_name <- file.path(parsed_args$out_dir,"results_per_MAF_bin.tsv")
+print(paste0("Saving summary results per MAF bin in ", file_name))
+write.table(res, file=file_name, quote = FALSE, row.names = FALSE, col.names = TRUE, sep = "\t")
+
+file_name <- file.path(parsed_args$out_dir, "overall_results_per_model.tsv")
+print(paste0("Saving overall summary results per model in ", file_name))
+write.table(overall_res, file=file_name, quote = FALSE, row.names = FALSE, col.names = TRUE, sep = "\t")
+
+file_name <- file.path(parsed_args$out_dir,"MAF_correls.tsv")
+print(paste0("Saving MAF correl results in ", file_name))
+write.table(correls, file=file_name, quote = FALSE, row.names = FALSE, col.names = TRUE, sep = "\t")
+
+
+
 plots <- list(p1,p2,p3,p4,p5)
 
 for(i in 1:5){
@@ -221,3 +253,4 @@ for(i in 1:5){
         ggsave(file_name, plot = plots[[i]], scale = 1, width = 15, height = 10, dpi = 300)
     }
 }
+
