@@ -17,6 +17,7 @@ print_help <- function(){
     cat("    --threshold [float]: Minimum correlation threshold (WGS vs imputed MAF correl) between -1 and 1, default=0.90\n")
     cat("    --custom_files [str, list]: list of custom evaluation results from other tools\n")
     cat("    --custom_names [str, list]: list of names for the custom evaluation results from other tools (i.e. minimac)\n")
+    cat("    --custom_title [str]: optional main title for the plots\n")
     q()
 
 
@@ -32,6 +33,7 @@ parser <- ArgumentParser(description='Plot model evaluation results.')
 
 parser$add_argument('tsv_files', metavar='N', type="character", nargs='+',help="evaluation result file names(s).")
 parser$add_argument('--threshold', type="double", default=0.90, help="Minimum correlation threshold (WGS vs imputed MAF correl) [default %default]")
+parser$add_argument('--custom_title', metavar='custom_title', type="character", default='', help="optional main title for the plots")
 
 
 if("--custom_files" %in% args){
@@ -170,18 +172,21 @@ p1 <- ggplot(res, aes(x=MAF_bin, y=Mean_r2, group=Model, color=Model)) +
     geom_line() +
     geom_errorbar(aes(ymin=Mean_r2-SE_r2, ymax=Mean_r2+SE_r2,  width=.1)) +
     theme_classic(base_size = 15) + 
+    labs(subtitle = parsed_args$custom_title, color = "") +
     guides(col = guide_legend(nrow = 40))
 
 p2 <- ggplot(res, aes(x=MAF_bin, y=Mean_Fscore, group=Model, color=Model)) +
     geom_line() +
     geom_errorbar(aes(ymin=Mean_Fscore-SE_Fscore, ymax=Mean_Fscore+SE_Fscore,  width=.1)) +
     theme_classic(base_size = 15) +
+    labs(subtitle = parsed_args$custom_title, color = "") +
     guides(col = guide_legend(nrow = 40))
 
 p3 <- ggplot(res, aes(x=MAF_bin, y=Mean_concordance, group=Model, color=Model)) +
     geom_line() +
     geom_errorbar(aes(ymin=Mean_concordance-SE_concordance, ymax=Mean_concordance+SE_concordance,  width=.1)) +
     theme_classic(base_size = 15) +
+    labs(subtitle = parsed_args$custom_title, color = "") +
     guides(col = guide_legend(nrow = 40))
 
 
@@ -198,6 +203,7 @@ p4 <- ggplot(data_to_plot,aes(x=WGS_MAF, y=IMPUTED_MAF,col=Model))+
     geom_point(alpha=0.5) +
     geom_abline(intercept = 0, slope = 1.0) +
     theme_classic(base_size = 15) +
+    labs(subtitle = parsed_args$custom_title, color = "") +
     guides(col = guide_legend(nrow = 40))
 
 
@@ -211,6 +217,7 @@ data_to_plot2$MAF <- as.numeric(data_to_plot2$MAF)
 p5 <- ggplot(data_to_plot2, aes(x=MAF, colour=Model)) +
     geom_density(aes(y = ..ndensity..)) +
     theme_classic(base_size = 15) +
+    labs(subtitle = parsed_args$custom_title, color = "") +
     guides(col = guide_legend(nrow = 40))
 
 
