@@ -1,0 +1,13 @@
+Model	COR	file_name
+model_1	0.929036928143699	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_1.vcf_per_variant.tsv
+model_10	-0.0990495502694782	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_10.vcf_per_variant.tsv
+model_11	0.064373256787678	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_11.vcf_per_variant.tsv
+model_12	0.905677628976066	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_12.vcf_per_variant.tsv
+model_2	0.93393188520142	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_2.vcf_per_variant.tsv
+model_3	0.296937500303901	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_3.vcf_per_variant.tsv
+model_4	-0.0243858868958888	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_4.vcf_per_variant.tsv
+model_5	0.840298274044396	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_5.vcf_per_variant.tsv
+model_6	0.846860348875177	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_6.vcf_per_variant.tsv
+model_7	0.00977821458856814	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_7.vcf_per_variant.tsv
+model_8	0.91914113178859	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_8.vcf_per_variant.tsv
+model_9	0.861450877439075	c1_ARIC_WGS_Freeze3.lifted_already_GRCh37.GH.ancestry-1-5.chr22.phased.38708556-38866010.vcf.VMV1.masked.imputed.model_9.vcf_per_variant.tsv
