@@ -13,6 +13,7 @@ import multiprocessing as mp
 from functools import partial # pool.map with multiple args
 import subprocess as sp
 
+
 #DL libraries
 import torch
 from torch import nn
@@ -37,7 +38,17 @@ min_MAF=0.0
 #Debugging options
 verbose=0
 
+#change this only for banchmarking multiprocessing speed
+par_mask_method = "threadpool" #["serial","threadpool","thread","joblib","ray"] "serial" to disable, parallel masking method, threadpool has been the fastest I found
+if(par_mask_method == "joblib"):
+    import joblib
+elif(par_mask_method == "thread"):
+    import threading, queue
+elif(par_mask_method == "ray"):
+    import ray
+do_numpy_masking=True
 par_mask_proc=mp.cpu_count()
+#
 
 def cmd_exists(cmd):
     for path in os.environ["PATH"].split(os.pathsep):
@@ -147,7 +158,7 @@ def filter_by_MAF(ys, MAF):
     return mapped_ys
 
 
-def mask_data_per_sample_parallel(mydata, mask_rate=0.9, par_mask_method="threadpool", do_numpy_masking=True):
+def mask_data_per_sample_parallel(mydata, mask_rate=0.9):
 
     if(verbose>0):
         print("Data to mask shape:", mydata.shape, flush=False)
@@ -363,7 +374,6 @@ def focal_loss(y_pred, y_true, gamma=3, alpha=None):
     return focal_cross_entropy_loss.mean()
             
 def flatten_data(x):
-    #x = np.copy(myinput)
     x = np.reshape(x, (x.shape[0],-1))
     return x    
 
@@ -449,6 +459,7 @@ def main(ar):
     act = ar.activation
     n_layers = ar.n_layers
     batch_size = ar.batch_size
+    start = 0 #if resuming, the number of the start epoch will change
 
     #will only reach max epochs if early stop won't reach a plateau
     max_epochs=ar.max_epochs
@@ -471,18 +482,30 @@ def main(ar):
 
     if not os.path.exists(model_dir):
         os.mkdir(model_dir)
-    
+
     model_path = model_dir+'/'+ar.model_id+'.pth'
     print("Model save path:", model_path)
 
-    hp_path = model_dir+'/'+ar.model_id+'_param.py'    
+    hp_path = model_dir+'/'+ar.model_id+'_param.py'
+
+    #TRAINING RESUME FEATURE ADDED: loads weights from previously trained model. Note that the current model must have the same architecture as the previous one.
+    if(ar.resume==True and (not os.path.exists(model_path) or not os.path.exists(hp_path))):
+        print("WARNING: model path doesn't exist:", model_path+" (and/or its respective *_param.py)", "\nYou set --resume=True but there is no model to resume from. Make sure you provided the correct path. The model will be trained from scratch.")
+    if(ar.resume==True and os.path.exists(model_path) and os.path.exists(hp_path)):
+        print("Resume mode activated (--resume) and found pre-existing model weights at", model_path, "\nLoading weights")
+        autoencoder.load_state_dict(torch.load(model_path))
+        import importlib.util #only needed if resuming
+        spec = importlib.util.spec_from_file_location(ar.model_id+'_param', hp_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        start=module.last_epoch
+
     with open(hp_path, 'w') as param_file:
         param_file.write("n_layers = "+str(n_layers)+"\n")
         param_file.write("size_ratio = "+str(size_ratio)+"\n")
         param_file.write("activation = \'"+act+"\'"+"\n")
     print("Inference parameters saved at:", hp_path)
     
-
     if(use_last_batch_for_validation==True):
         print("shape val (input):", y_val.shape)
         print("shape val (output):", filtered_y_val.shape)        
@@ -511,11 +534,10 @@ def main(ar):
     else:
         alphas = calculate_alpha(filtered_y_true)
     
-        
-    startTime = time.time()    
+    startTime = time.time()
     i=0
     
-    for epoch in range(max_epochs):
+    for epoch in range(start,max_epochs):
         epochStart = time.time()
         epoch_loss=0
         
@@ -596,16 +618,18 @@ def main(ar):
                 tmp_loss = 0
                 print("Saving model to", model_path)
                 torch.save(autoencoder.state_dict(), model_path)
+                with open(hp_path, 'a') as param_file:
+                    param_file.write("last_epoch = "+str(epoch+1)+"\n")
             else:
                 print("Early stoping, no improvement observed. Previous loss:", avg_loss, "Currentloss:", tmp_loss)
                 print("Best model at", model_path)
+                with open(hp_path, 'a') as param_file:
+                    param_file.write("early_stop = "+str(epoch+1)+"\n")
                 break
-                
             #exponentially decrease learning rate in each checkpoint
             if(decayRate>0):
                 my_lr_scheduler.step()
-        
-    
+
     executionTime = (time.time() - startTime)
 
     print('Execution time in seconds: ' + str(executionTime))
@@ -629,21 +653,16 @@ if __name__ == "__main__":
     parser.add_argument("-F", "--activation", type=str, help="[relu, leakyrelu, tanh, sigmoid] activation function type", default='relu')
     parser.add_argument("-O", "--optimizer", type=str, help="[adam, sgd, adadelta, adagrad] optimizer type", default='adam')
     parser.add_argument("-T", "--loss_type", type=str, help="[CE or FL] whether use CE for binary cross entropy or FL for focal loss", default='CE')
-    parser.add_argument("-D", "--n_layers", type=int, help="[int, even number] total number of layers", default=4)
+    parser.add_argument("-D", "--n_layers", type=int, help="[int, even number] total number of hidden layers", default=4)
     parser.add_argument("-S", "--size_ratio", type=float, help="[float(0-1]] size ratio for successive layer shrink (current layer size = previous layer size * size_ratio)", default=0.5)
     parser.add_argument("-E", "--decay_rate", type=float, help="[float[0-1]] learning rate decay ratio (0 = decay deabled)", default=0.)
     parser.add_argument("-H", "--model_id", type=str, help="[int/str] model id or name to use for saving the model", default='best_model')
     parser.add_argument("-J", "--model_dir", type=str, help="[str] path/directory to save the model", default='auto')
     parser.add_argument("-Z", "--batch_size", type=int, help="[int] batch size", default=256)
     parser.add_argument("-X", "--max_epochs", type=int, help="[int] maximum number of epochs if early stop criterion is not reached", default=20000)
+    parser.add_argument("-U", "--resume", type=int, help="[0 or 1]=[false or true] whether enable resume mode: recover saved model (<model_id>.pth file) in the model folder and resume training from its saved weights.", default=0)
 
-    
     args = parser.parse_args()
     print("ARGUMENTS", args)
-    
+
     main(args)
-
-
-
-
-# %%
