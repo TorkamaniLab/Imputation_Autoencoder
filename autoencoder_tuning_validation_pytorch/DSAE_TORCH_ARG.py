@@ -460,6 +460,8 @@ def main(ar):
     n_layers = ar.n_layers
     batch_size = ar.batch_size
     start = 0 #if resuming, the number of the start epoch will change
+    avg_loss = np.inf #if resuming, starting avg_loss will be the previous checkpoint's loss value
+    tmp_loss = 0
 
     #will only reach max epochs if early stop won't reach a plateau
     max_epochs=ar.max_epochs
@@ -489,6 +491,7 @@ def main(ar):
     hp_path = model_dir+'/'+ar.model_id+'_param.py'
 
     #TRAINING RESUME FEATURE ADDED: loads weights from previously trained model. Note that the current model must have the same architecture as the previous one.
+    write_mode = 'w'
     if(ar.resume==True and (not os.path.exists(model_path) or not os.path.exists(hp_path))):
         print("WARNING: model path doesn't exist:", model_path+" (and/or its respective *_param.py)", "\nYou set --resume=True but there is no model to resume from. Make sure you provided the correct path. The model will be trained from scratch.")
     if(ar.resume==True and os.path.exists(model_path) and os.path.exists(hp_path)):
@@ -499,12 +502,14 @@ def main(ar):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         start=module.last_epoch
+        avg_loss=module.avg_loss
+        write_mode ='a'
 
-    with open(hp_path, 'w') as param_file:
+    with open(hp_path, write_mode) as param_file:
         param_file.write("n_layers = "+str(n_layers)+"\n")
         param_file.write("size_ratio = "+str(size_ratio)+"\n")
         param_file.write("activation = \'"+act+"\'"+"\n")
-    print("Inference parameters saved at:", hp_path)
+    print("New inference parameters saved at:", hp_path)
     
     if(use_last_batch_for_validation==True):
         print("shape val (input):", y_val.shape)
@@ -513,8 +518,6 @@ def main(ar):
     print("shape train (output):", filtered_y_train.shape)
     
     total_batch = int((n/batch_size)-0.5)
-    avg_loss = np.inf
-    tmp_loss = 0
     
     if(encode_inputs_to_binomial==True):
         data_obs = convert_dosage_to_binomial(y_train.copy())
@@ -620,6 +623,7 @@ def main(ar):
                 torch.save(autoencoder.state_dict(), model_path)
                 with open(hp_path, 'a') as param_file:
                     param_file.write("last_epoch = "+str(epoch+1)+"\n")
+                    param_file.write("avg_loss = "+str(avg_loss.item())+"\n")
             else:
                 print("Early stoping, no improvement observed. Previous loss:", avg_loss, "Currentloss:", tmp_loss)
                 print("Best model at", model_path)
