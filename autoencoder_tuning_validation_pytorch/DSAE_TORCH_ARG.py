@@ -504,11 +504,18 @@ def main(ar):
         start=module.last_epoch
         avg_loss=module.avg_loss
         write_mode ='a'
+        if(module.early_stop > 0):
+            print("Cancelling training because early stop was already reached at epoch", early_stop)
+            sys.exit()
+        else:
+            print("Resuming training from epoch", start)
 
     with open(hp_path, write_mode) as param_file:
         param_file.write("n_layers = "+str(n_layers)+"\n")
         param_file.write("size_ratio = "+str(size_ratio)+"\n")
         param_file.write("activation = \'"+act+"\'"+"\n")
+        if write_mode == 'w':
+            param_file.write("early_stop = 0")
     print("New inference parameters saved at:", hp_path)
     
     if(use_last_batch_for_validation==True):
