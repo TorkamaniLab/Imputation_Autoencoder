@@ -505,7 +505,7 @@ def main(ar):
         avg_loss=module.avg_loss
         write_mode ='a'
         if(module.early_stop > 0):
-            print("Cancelling training because early stop was already reached at epoch", early_stop)
+            print("Cancelling training because early stop was already reached at epoch", module.early_stop)
             sys.exit()
         else:
             print("Resuming training from epoch", start)
