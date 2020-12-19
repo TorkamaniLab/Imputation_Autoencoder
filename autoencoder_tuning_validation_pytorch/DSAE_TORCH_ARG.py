@@ -515,7 +515,7 @@ def main(ar):
         param_file.write("size_ratio = "+str(size_ratio)+"\n")
         param_file.write("activation = \'"+act+"\'"+"\n")
         if write_mode == 'w':
-            param_file.write("early_stop = 0")
+            param_file.write("early_stop = 0\n")
     print("New inference parameters saved at:", hp_path)
     
     if(use_last_batch_for_validation==True):
