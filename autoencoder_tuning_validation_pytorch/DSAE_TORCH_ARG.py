@@ -473,7 +473,9 @@ def main(ar):
     optimizer = get_optimizer(autoencoder.parameters(), learning_rate, L2, optimizer_type=optimizer_type)
     
     my_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=decayRate)
-    
+    current_lr =  my_lr_scheduler.get_last_lr()
+    print("Learning rate:", current_lr[0])
+
     # get the layers as a list to apply sparsity penalty later
     model_children = list(autoencoder.children()) 
     print(model_children)
@@ -509,6 +511,18 @@ def main(ar):
             sys.exit()
         else:
             print("Resuming training from epoch", start)
+        if(decayRate>0):
+            current_lr = learning_rate
+            for i in range(int(start/n_masks)):
+                #this throws a warning
+                #my_lr_scheduler.step()
+                #current_lr =  my_lr_scheduler.get_last_lr()
+                #equivalent code bellow, without warning
+                current_lr = current_lr*decayRate
+            optimizer = get_optimizer(autoencoder.parameters(), current_lr, L2, optimizer_type=optimizer_type)
+            my_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=decayRate)
+            current_lr =  my_lr_scheduler.get_last_lr()
+            print("Resuming training from learning rate:", current_lr[0])
 
     with open(hp_path, write_mode) as param_file:
         param_file.write("n_layers = "+str(n_layers)+"\n")
@@ -640,6 +654,8 @@ def main(ar):
             #exponentially decrease learning rate in each checkpoint
             if(decayRate>0):
                 my_lr_scheduler.step()
+                current_lr =  my_lr_scheduler.get_last_lr()
+                print("Current learning rate:",current_lr[0])
 
     executionTime = (time.time() - startTime)
 
