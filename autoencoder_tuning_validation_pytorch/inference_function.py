@@ -54,7 +54,7 @@ def parse_arguments(user_arguments):
                         used to build imputed file")
     parser.add_argument('infile',
                         metavar='genotype_array',
-                        type=lambda x: is_valid_path(parser, x, valid_extensions=['masked']),
+                        type=lambda x: is_valid_path(parser, x, valid_extensions=['masked', 'gz', 'vcf']),
                         help="Genotype array file in VCF format, file to be imputed")
     parser.add_argument('model_dir',
                         metavar='model_dir',
@@ -261,10 +261,17 @@ def create_predicted_gen(new_df_sample, known_indexes, y_pred_sample, is_debug_o
 
 
 def get_header_line(input_file):
-    with open(input_file) as f:
-        for line in f:
-            if line.startswith("#CHROM"):
-                return line
+    if(str(input_file).endswith('.gz')):
+        import gzip
+        with gzip.open(input_file,'rt') as f:
+            for line in f:
+                if line.startswith("#CHROM"):
+                    return line
+    else:
+        with open(input_file) as f:
+            for line in f:
+                if line.startswith("#CHROM"):
+                    return line
     return None
 
 
@@ -329,10 +336,15 @@ def main(argv):
     new_df = flatten(new_df.copy())
     logger.info('Time to load & preprocess the data (sec): %f' % (timeit.default_timer() - start))
 
+    if args.use_gpu:
+        new_df_tensor = Variable(torch.from_numpy(new_df).float()).cuda()
+        loaded_model = Autoencoder(input_dim=len(new_df[0]), output_dim=len(new_df[0]), n_layers=module.n_layers, size_ratio=module.size_ratio, activation=module.activation).cuda()
+        loaded_model.load_state_dict(torch.load(meta_path))
+    else:
+        new_df_tensor = Variable(torch.from_numpy(new_df).float())
+        loaded_model = Autoencoder(input_dim=len(new_df[0]), output_dim=len(new_df[0]), n_layers=module.n_layers, size_ratio=module.size_ratio, activation=module.activation)
+        loaded_model.load_state_dict(torch.load(meta_path, map_location='cpu'))
 
-    new_df_tensor = Variable(torch.from_numpy(new_df).float()).cuda()
-    loaded_model = Autoencoder(input_dim=len(new_df[0]), output_dim=len(new_df[0]), n_layers=module.n_layers, size_ratio=module.size_ratio, activation=module.activation).cuda()
-    loaded_model.load_state_dict(torch.load(meta_path))
     # y_pred = loaded_model.predict(new_df)
     reconstructed = loaded_model(new_df_tensor)
     y_pred = reconstructed.cpu().detach().numpy()
