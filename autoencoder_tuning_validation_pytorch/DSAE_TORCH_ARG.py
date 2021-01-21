@@ -509,6 +509,9 @@ def main(ar):
         if(module.early_stop > 0):
             print("Cancelling training because early stop was already reached at epoch", module.early_stop)
             sys.exit()
+        elif(start == max_epochs):
+            print("Cancelling training because max_epochs was already reached at previous run", max_epochs)            
+            sys.exit()            
         else:
             print("Resuming training from epoch", start)
         if(decayRate>0):
