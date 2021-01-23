@@ -47,7 +47,8 @@ elif(par_mask_method == "thread"):
 elif(par_mask_method == "ray"):
     import ray
 do_numpy_masking=True
-par_mask_proc=mp.cpu_count()
+#set max 20 or less CPUs for masking, avoid interprocess and CPU-GPU communication overload
+par_mask_proc=min(20,mp.cpu_count())
 #
 
 def cmd_exists(cmd):
