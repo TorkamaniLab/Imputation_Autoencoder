@@ -21,6 +21,11 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 
+print("Pytorch version is:", torch.__version__)
+print("Cuda version is:", torch.version.cuda)
+print("cuDNN version is :", torch.backends.cudnn.version())
+print("Arch version is :", torch._C._cuda_getArchFlags())
+
 #test torch.float64 later (impact in accuracy and runtime)
 torch.set_default_dtype(torch.float32)
 
@@ -47,8 +52,8 @@ elif(par_mask_method == "thread"):
 elif(par_mask_method == "ray"):
     import ray
 do_numpy_masking=True
-#set max 20 or less CPUs for masking, avoid interprocess and CPU-GPU communication overload
-par_mask_proc=min(20,mp.cpu_count())
+#set max 40 or less CPUs for masking, avoid interprocess and CPU-GPU communication overload
+par_mask_proc=min(40,mp.cpu_count())
 #
 
 def cmd_exists(cmd):
@@ -568,7 +573,6 @@ def main(ar):
     for epoch in range(start,max_epochs):
         epochStart = time.time()
         epoch_loss=0
-        
         #prepare data, do masking
         print("MASK RATIO:",mask_ratio_list[i])
         xs = mask_data_per_sample_parallel(data_obs.copy(), mask_rate=mask_ratio_list[i])
@@ -577,12 +581,18 @@ def main(ar):
         randomize = np.random.rand(len(ys)).argsort()
         xs=xs[randomize]
         ys=ys[randomize]
-        
+        cpuStop = time.time()
+        cpuTime = (cpuStop-epochStart)
+
+        comTime = 0        
+        gpuTime = 0
+
         i+=1
         if(i==n_masks):
             i=0
         for batch_i in range(total_batch):
             
+            comStart = time.time()
             #prepare data
             batch_features = [xs[batch_i*batch_size:(batch_i+1)*batch_size], 
                               ys[batch_i*batch_size:(batch_i+1)*batch_size]]
@@ -594,7 +604,10 @@ def main(ar):
             #for float32
             masked_data = Variable(torch.from_numpy(batch_features[0]).float()).cuda()
             true_data = Variable(torch.from_numpy(batch_features[1]).float()).cuda()
-            
+
+            gpuStart = time.time()
+            comTime += (gpuStart-comStart)
+
             #forward propagation
             reconstructed = autoencoder(masked_data)
            
@@ -620,6 +633,7 @@ def main(ar):
             loss.backward()
             optimizer.step()
             
+            gpuTime += (time.time()-gpuStart)
             epoch_loss+=loss.data
         
         if(use_last_batch_for_validation==True):
@@ -637,7 +651,7 @@ def main(ar):
         tmp_loss += epoch_loss
         epochTime = (time.time()-epochStart)
                 
-        print('epoch [{}/{}], epoch time:{:.4f}, loss:{:.4f}'.format(epoch + 1, max_epochs,epochTime, epoch_loss), flush=True)
+        print('epoch [{}/{}], epoch time:{:.4f}, CPU-task time:{:.4f}, GPU-task time:{:.4f}, CPU-GPU-communication time:{:.4f}'.format(epoch + 1, max_epochs,epochTime, cpuTime, gpuTime, comTime), flush=True)
         
         if((epoch+1) % n_masks == 0):
             if(avg_loss > tmp_loss):
