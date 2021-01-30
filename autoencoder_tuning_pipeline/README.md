@@ -4,7 +4,7 @@ Set shared arguments and options, edit the argments listed bellow
 
 - config : configuration file, use the provided file in this repository if working at Scripps cluster, or edit yours following the original file as template (input.cfg)
 - out : directory where all output subdirectories will be created
-- gpu : which gpu will be used (e.g. a100, v100, titanv, etc), only a100 supported now, new version comming soon
+- gpu : which gpu will be used (e.g. a100, v100, titanv, etc), only a100, v100, and titanv supported now
 
 ```
 config=/mnt/stsi/stsi0/raqueld/imputator/autoencoder_tuning_pipeline/input.cfg
