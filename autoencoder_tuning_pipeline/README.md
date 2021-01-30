@@ -46,7 +46,7 @@ comming soon!
 
 ## 2. Validation and model selection
 
-### Validate results from step 1. Option 1. (random/grid search)
+### 2. Option 1: validate results from step 1. Option 1. (random/grid search)
 
 Single VMV example, try this first to make sure it works
 
@@ -67,7 +67,7 @@ while read indir; do
 done < $out/model_dir_list.txt
 ```
 
-### Validate results from step 1. Option 2. (raytune)
+### 2. Option 2: validate results from step 1. Option 2. (raytune)
 
 Skip (already done by raytune, whenever raytune is implemented).
 
