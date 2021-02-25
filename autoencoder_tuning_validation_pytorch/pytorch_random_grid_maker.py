@@ -12,6 +12,8 @@ import sys
 sample_size = 10
 sample_size = int(sys.argv[1])
 
+starting_id = int(sys.argv[2])
+
 #activation
 act_arr = ['relu', 'tanh', 'sigmoid', 'leakyrelu']
 #L1
@@ -43,7 +45,7 @@ hp_list = [l1_arr, l2_arr, beta_arr, rho_arr, gamma_arr, alpha_arr,
            learning_rate_arr, act_arr, opt_array, loss_arr, nl_arr,
            hs_arr, decay_arr]
 
-hp_labels = ['model_id','l1', 'l1', 'beta', 'rho', 'gamma', 'disable_alpha',
+hp_labels = ['model_id','l1', 'l2', 'beta', 'rho', 'gamma', 'disable_alpha',
              'learn_rate', 'activation', 'optimizer', 'loss_type', 'n_layers',
              'size_ratio', 'decay_rate']
 
@@ -54,7 +56,8 @@ sampled_hps = []
 script_name="DSAE_TORCH_ARG.py"
 
 for i in range(sample_size):
-    hp_set = ['model_'+str(i+1)]    
+    #hp_set = ['model_'+str(i+1)]    
+    hp_set = ['model_'+str(i+starting_id)]    
     for hp_sublist in hp_list:
         hp_set += [np.random.choice(hp_sublist)]
     #print(hp_set)
@@ -84,7 +87,5 @@ with open(str(sample_size)+'_random_hyperparameters.sh', 'w') as file_object:
         cmd="CUDA_VISIBLE_DEVICES=<my_GPU_id> python3 "+script_name+" --input <my_input_file> --min_mask <my_min_mask> --max_mask <my_max_mask>"
         for label, value in zip(hp_labels, hps):
             cmd+=" --"+label+" "+str(value)
-        print(cmd)
-        file_object.write(cmd+"\n")
-        
-
+        print(cmd+" --resume 1")
+        file_object.write(cmd+" --resume 1\n")
