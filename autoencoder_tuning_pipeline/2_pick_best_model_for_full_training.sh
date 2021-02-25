@@ -25,11 +25,16 @@ best=$(cat $train_script.model_r2pop.txt | sort -k2,2g | tail -n 1 | cut -f 1)
 cat $train_script | grep -w $best | sed -e 's/ --max_epochs 500 / --max_epochs 50000 /g' | sed -e "s/$best/${best}_F/g" > ${train_script}.best
 file=$(basename ${train_script}.best)
 
+for model in unphased_minimac phased_minimac unphased_beagle phased_beagle unphased_impute phased_impute; do
+    avg=$(cat ${1}[0-9]/overall_results_per_model.tsv | grep -w $model | cut -f 2 | awk '{ sum += $1 } END { if(NR==0) {print "NA"} else{print sum / NR} }')
+    echo -e "$model\t$avg"
+done > $train_script.competitor_r2pop.txt
 
 echo
 echo -e "Best model is $best, new full training model name: ${best}_F"
 echo -e "Full training script created at ${train_script}.best"
-echo -e "Mean r2 per feature across validation datasets listed at $train_script.model_r2pop.txt"
+echo -e "Models mean r2 per feature across validation datasets listed at $train_script.model_r2pop.txt"
+echo -e "Competitors mean r2 per feature across validation datasets listed at $train_script.competitor_r2pop.txt"
 echo
 echo -e "To run the training:"
 echo -e "bash $file 1> $file.out 2> $file.log"

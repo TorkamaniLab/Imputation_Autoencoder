@@ -648,10 +648,10 @@ def main(ar):
                 
 
                 
-        tmp_loss += epoch_loss
+        tmp_loss += epoch_loss/total_batch
         epochTime = (time.time()-epochStart)
                 
-        print('epoch [{}/{}], epoch time:{:.4f}, CPU-task time:{:.4f}, GPU-task time:{:.4f}, CPU-GPU-communication time:{:.4f}'.format(epoch + 1, max_epochs,epochTime, cpuTime, gpuTime, comTime), flush=True)
+        print('epoch [{}/{}], epoch time:{:.4f}, CPU-task time:{:.4f}, GPU-task time:{:.4f}, CPU-GPU-communication time:{:.4f}, loss:{:.4f}'.format(epoch + 1, max_epochs,epochTime, cpuTime, gpuTime, comTime, epoch_loss/total_batch), flush=True)
         
         if((epoch+1) % n_masks == 0):
             if(avg_loss > tmp_loss):

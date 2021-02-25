@@ -17,7 +17,8 @@ cd $model_folder
 train_root=$(cat $cfg | grep "TRAIN_DIR" | awk '{print $NF}')
 suffix=$(cat BATCH_ID)
 train_script=$(cat BATCH_ID)
-minimac_suffix=.masked.imputed_minimac.dose.vcf_per_variant_results.txt
+#minimac_suffix=.masked.imputed_minimac.dose.vcf_per_variant_results.txt
+competitor_suffix=.masked.imputed_COMPETITOR.dose.vcf_per_variant_results.txt
 VMVpath=$(cat INPUT)
 VMV=$(basename $VMVpath)
 
@@ -40,17 +41,45 @@ for i in $(grep "VAL_GA_DIR" $cfg | tr -d ' '); do
         tsv_list="evaluation_output_$idx/*model*_F.*per_variant*.tsv"
     fi
 
-    VAL=$(basename $(find ${val_root}_minimac4 | grep $region | grep ${minimac_suffix}))
-    phased=$(echo ${val_root}_minimac4/$VAL | sed -e 's/_unphased_/_/g')
-    custom_files="--custom_files $phased ${val_root}_minimac4/$VAL"
-    custom_title=$(basename $model_folder | tr '_' ':' | sed -e 's/^/chr/g')
+    #minimac
+    #VAL=$(basename $(find ${val_root}_minimac4 | grep $region | grep ${minimac_suffix}))
+    #phased=$(echo ${val_root}_minimac4/$VAL | sed -e 's/_unphased_/_/g')
+    #custom_files="--custom_files $phased ${val_root}_minimac4/$VAL"
+    #if [ -z "$VAL" ]; then
+    #    custom_files=""
+    #    custom_names=""
+    #else
+    #    custom_names="--custom_names phased_minimac unphased_minimac"
+    #fi
 
-    if [ -z "$VAL" ]; then
+    custom_files="--custom_files"
+    custom_names="--custom_names"
+    #generalized to all competitors
+    my_error=0
+    for competitor in minimac4 beagle5 impute5; do
+        my_name=$(echo $competitor | sed -e 's/[0-9]//g')
+        if [ $competitor = minimac4 ]; then
+            my_suffix=$(echo $competitor_suffix | sed -e "s/COMPETITOR/${my_name}/g")
+        else
+            my_suffix=$(echo $competitor_suffix | sed -e "s/COMPETITOR\.dose/${my_name}/g")
+        fi
+        VAL=$(basename $(find ${val_root}_${competitor} | grep $region | grep ${my_suffix}))
+        phased=$(echo ${val_root}_$competitor/$VAL | sed -e 's/_unphased_/_/g')
+        unphased="${val_root}_$competitor/$VAL"
+        if [ ! -z "$VAL" ]; then
+            custom_files="$custom_files $phased $unphased"
+            custom_names="$custom_names phased_$my_name unphased_$my_name"
+        else
+            my_error=1
+            echo "ERROR $competitor NOT FOUND. TRIED: find ${val_root}_${competitor} | grep $region | grep ${my_suffix}"
+        fi
+    done
+    if [ $my_error -eq 1 ]; then
         custom_files=""
         custom_names=""
-    else
-        custom_names="--custom_names phased_minimac unphased_minimac"
     fi
+
+    custom_title=$(basename $model_folder | tr '_' ':' | sed -e 's/^/chr/g')
 
     if [ -z ${3} ]; then
         cmd3="Rscript $plot_script $tsv_list --threshold -1 $custom_files $custom_names --custom_title $custom_title --out_dir plots_$idx"    

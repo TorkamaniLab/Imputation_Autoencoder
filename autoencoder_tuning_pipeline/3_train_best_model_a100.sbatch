@@ -8,7 +8,7 @@
 #SBATCH --job-name=1_train_GS
 #SBATCH --output=%x.oe%j
 #SBATCH --error=%x.oe%j
-#SBATCH --gres=gpu:a100:1
+#SBATCH --gres=gpu:a100:4
 
 ######BSUB -P bif119
 ######BSUB -W 2:00

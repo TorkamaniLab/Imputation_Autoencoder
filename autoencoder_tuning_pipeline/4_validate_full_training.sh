@@ -5,7 +5,7 @@ input=$2
 
 gsstarttime=$(date +%s)
 
-echo -e "bash 2_generate_validation_commands.sh $mdir $input"
+echo -e "bash 2_generate_validation_commands.sh $mdir $input best_only  > $mdir/validation_commands.sh"
 
 bash 2_generate_validation_commands.sh $mdir $input best_only > $mdir/validation_commands.sh
 
