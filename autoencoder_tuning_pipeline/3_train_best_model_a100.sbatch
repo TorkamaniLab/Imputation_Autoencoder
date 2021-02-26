@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=96
 #SBATCH --mem=240G
 #SBATCH --partition=stsi
 #SBATCH --time=600:00:00
@@ -50,7 +50,7 @@ module load R
 #echo
 echo -e "Work dir is $SLURM_SUBMIT_DIR"
 #echo -e "Work dir is $LS_SUBCWD"
-echo -e "VMV is $indir, GPU a100 $ngpus GPUs"
+echo -e "Train list is $train_list, GPU a100"
 #echo -e "The shell is $SHELL"
 #echo
 
@@ -59,5 +59,4 @@ echo -e "VMV is $indir, GPU a100 $ngpus GPUs"
 #cd $LS_SUBCWD
 cd $SLURM_SUBMIT_DIR
 
-bash 3_train_best_model.sh $train_list
-
+bash 3_train_best_model.sh $train_list A100

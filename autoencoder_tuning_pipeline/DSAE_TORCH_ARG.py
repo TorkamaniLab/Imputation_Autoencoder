@@ -509,11 +509,21 @@ def main(ar):
         spec = importlib.util.spec_from_file_location(ar.model_id+'_param', hp_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        start=module.last_epoch
-        avg_loss=module.avg_loss
+        if "last_epoch" in dir(module):
+            start=module.last_epoch
+        else:
+            print("Previous epoch value not found... Keeping 0 value.")
+        if "avg_loss" in dir(module):
+            avg_loss=module.avg_loss
+        else:
+            print("Previous losss value not found... Keeping Inf value.")
+        if 'early_stop' in dir(module):
+            early_stop = module.early_stop
+        else:
+            early_stop = 0
         write_mode ='a'
-        if(module.early_stop > 0):
-            print("Cancelling training because early stop was already reached at epoch", module.early_stop)
+        if(early_stop > 0):
+            print("Cancelling training because early stop was already reached at epoch", early_stop)
             sys.exit()
         elif(start == max_epochs):
             print("Cancelling training because max_epochs was already reached at previous run", max_epochs)            
