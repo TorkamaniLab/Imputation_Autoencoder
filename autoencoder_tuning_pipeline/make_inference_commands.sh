@@ -45,7 +45,7 @@ for model_path in ${model_dir}/*.pth; do
     out_path="$out_dir/${ga_name}.imputed.${model_name}.vcf"
 
 
-    cmd="python3 $script $pos $ga_path $model_dir --model_name $model_name --output $out_path"
+    cmd="python3 $script $pos $ga_path $model_dir --model_name $model_name --output $out_path; bgzip -c $out_path > $out_path.gz; tabix -p vcf -f $out_path.gz; rm $out_path"
     #cmd="python3 $script $pos $ga_path $model_dir --model_name $model_name --output $out_path --use_gpu"
     echo $cmd
 done
