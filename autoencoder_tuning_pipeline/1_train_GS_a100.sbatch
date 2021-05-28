@@ -81,7 +81,7 @@ rm -rf $new_indir
 #bash 1_train_GS.sh $indir
 
 
-nmodels=$(ls -l $indir/IMPUTATOR_*/*[0-9].pth | wc -l)
+nmodels=$(ls -l $indir/IMPUTATOR_*/*.pth | grep -v "_F.pth" | wc -l)
 
 if [ $nmodels -lt 90 ]; then
     "Error, less than 90 models ran successfully, please check errors and rerun this job. Exiting with non-zero status."
