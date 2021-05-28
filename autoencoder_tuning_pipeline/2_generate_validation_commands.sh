@@ -1,3 +1,5 @@
+N_THREADS=8
+
 if [ -z $1 ] || [ -z $2 ]; then
     echo "usage: bash generate_validation_commands.sh <models_folder> <config_file> <optional_best_only>"
     echo "exemplo: bash generate_validation_commands.sh 1_155032673-155469304 input.cfg"
@@ -32,12 +34,12 @@ for i in $(grep "VAL_GA_DIR" $cfg | tr -d ' '); do
     val_wgs=$(cat $cfg | tr -d ' ' | tr '=' '\t' | grep -w "^VAL_WGS_DIR\.$idx" | awk '{print $NF}')
     
     if [ -z $3 ]; then
-        cmd1="bash $inference_script IMPUTATOR_$VMV ${VMV}.1-5 $val_root inference_output_$idx > run_inference.sh\n\nparallel -j 16 < run_inference.sh"
-        cmd2="bash $evaluation_script inference_output_$idx $val_root $val_wgs evaluation_output_$idx > run_evaluation.sh\n\parallel -j 16 < run_evaluation.sh"
+        cmd1="bash $inference_script IMPUTATOR_$VMV ${VMV}.1-5 $val_root inference_output_$idx > run_inference.sh\n\nparallel -j $N_THREADS < run_inference.sh"
+        cmd2="bash $evaluation_script inference_output_$idx $val_root $val_wgs evaluation_output_$idx > run_evaluation.sh\n\nparallel -j $N_THREADS < run_evaluation.sh"
         tsv_list="evaluation_output_$idx/*model*.*per_variant*.tsv"
     else
-        cmd1="bash $inference_script IMPUTATOR_$VMV ${VMV}.1-5 $val_root inference_output_$idx  | grep \"_F\.\" > run_inference.sh\n\n parallel -j 16 < run_inference.sh"
-        cmd2="bash $evaluation_script inference_output_$idx $val_root $val_root evaluation_output_$idx  | grep \"_F\.\" > run_evaluation.sh\n\parallel -j 16 < run_evaluation.sh"
+        cmd1="bash $inference_script IMPUTATOR_$VMV ${VMV}.1-5 $val_root inference_output_$idx  | grep \"_F\.\" > run_inference.sh\n\nparallel -j $N_THREADS < run_inference.sh"
+        cmd2="bash $evaluation_script inference_output_$idx $val_root $val_wgs evaluation_output_$idx  | grep \"_F\.\" > run_evaluation.sh\n\nparallel -j $N_THREADS < run_evaluation.sh"
         tsv_list="evaluation_output_$idx/*model*_F.*per_variant*.tsv"
     fi
 
