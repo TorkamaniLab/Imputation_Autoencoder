@@ -36,21 +36,23 @@ fi
 
 
 while read train_script; do
+
     result=-1
     echo $train_script
+    curr_dir=$(pwd)
+    train_dir=$(dirname $train_script)
+    nvar=$(cat $train_dir/NVAR)
+    batchi=$(cat $train_dir/BATCH_ID)
+    ngpus=$(nvidia-smi --query-gpu=gpu_name --format=csv | tail -n +2 | wc -l)
+
+    #1. check how much VRAM this model needs, previously calculated by 1_train_GS_a100.sbatch
+    #mem_needed=$(python3 tools/estimate_VRAM_needed_for_autoencoder.py $nvar | tail -n 1 | awk '{print $NF}' | sed -e 's/MiB//g')
+    mem_needed=$(cat $train_dir/VRAM)
+
     while [ $result -eq -1 ]; do
         result=-1
         echo "Submitting ${train_script}"
 
-
-
-        curr_dir=$(pwd)
-        train_dir=$(dirname $train_script)
-        nvar=$(cat $train_dir/NVAR)
-        #1. check how much VRAM this model needs, previously calculated by 1_train_GS_a100.sbatch
-        mem_needed=$(cat $train_dir/VRAM)
-        batchi=$(cat $train_dir/BATCH_ID)
-        ngpus=$(nvidia-smi --query-gpu=gpu_name --format=csv | tail -n +2 | wc -l)
     
         #2. check the VRAM still available in GPUs
         gpui_mem=$(nvidia-smi --query-gpu=gpu_name,memory.free --format=csv | tail -n +2 | awk '{print NR-1 "\t" $(NF-1)}' | sort -k2g -k1gr | tail -n 1)

@@ -334,22 +334,32 @@ def main(argv):
     start = timeit.default_timer()
     new_df, known_indexes = process_data(args.posfile, args.infile)
     new_df = flatten(new_df.copy())
-    logger.info('Time to load & preprocess the data (sec): %f' % (timeit.default_timer() - start))
+
 
     if args.use_gpu:
         new_df_tensor = Variable(torch.from_numpy(new_df).float()).cuda()
+        logger.info('Time to load & preprocess the data (sec): %f' % (timeit.default_timer() - start))
+        start = timeit.default_timer()
         loaded_model = Autoencoder(input_dim=len(new_df[0]), output_dim=len(new_df[0]), n_layers=module.n_layers, size_ratio=module.size_ratio, activation=module.activation).cuda()
         loaded_model.load_state_dict(torch.load(meta_path))
+        logger.info('Time to load the model (sec): %f' % (timeit.default_timer() - start))
+        start = timeit.default_timer()
     else:
         new_df_tensor = Variable(torch.from_numpy(new_df).float())
+        logger.info('Time to load & preprocess the data (sec): %f' % (timeit.default_timer() - start))
+        start = timeit.default_timer()
         loaded_model = Autoencoder(input_dim=len(new_df[0]), output_dim=len(new_df[0]), n_layers=module.n_layers, size_ratio=module.size_ratio, activation=module.activation)
         loaded_model.load_state_dict(torch.load(meta_path, map_location='cpu'))
+        logger.info('Time to load the model (sec): %f' % (timeit.default_timer() - start))
+        start = timeit.default_timer()
 
     # y_pred = loaded_model.predict(new_df)
     reconstructed = loaded_model(new_df_tensor)
+    logger.info('Time to do inference (sec): %f' % (timeit.default_timer() - start))
+    start = timeit.default_timer()
+
     y_pred = reconstructed.cpu().detach().numpy()
 
-    start = timeit.default_timer()
     pool = mp.Pool(mp.cpu_count())
     out = pool.starmap(
         create_predicted_gen,

@@ -27,7 +27,7 @@ for imputed_path in $imputed_dir/*.vcf.gz; do
 
     ga_name=$(basename $imputed_path | sed -e 's/\.imputed\..*//g')
 
-    ga_path=$(find $ga_dir | grep -w "${ga_name}\.gz$")
+    ga_path=$(find $ga_dir/ | grep -w "${ga_name}\.gz$")
     #ga_path=$(find $ga_dir | grep -w "${ga_name}$") #this returns error in cyvcf2
 
 
@@ -38,7 +38,7 @@ for imputed_path in $imputed_dir/*.vcf.gz; do
     fi
 
     wgs_name=$(basename $ga_path | sed -e 's/\.masked\..*//g')
-    wgs_path=$(find $wgs_dir | grep -w "${wgs_name}\.gz$")
+    wgs_path=$(find $wgs_dir/ | grep -w "${wgs_name}\.gz$")
 
     if [ -z $wgs_path ]; then
 
@@ -46,8 +46,9 @@ for imputed_path in $imputed_dir/*.vcf.gz; do
         exit
     fi
 
-    sout=$out_dir/${imputed_name}_per_sample.tsv
-    vout=$out_dir/${imputed_name}_per_variant.tsv
+    imputed_name_preffix=$(echo ${imputed_name} | sed -e 's/\.gz$//g')
+    sout=$out_dir/${imputed_name_preffix}_per_sample.tsv
+    vout=$out_dir/${imputed_name_preffix}_per_variant.tsv
 
     #echo $imputed_path
     #echo $ga_path

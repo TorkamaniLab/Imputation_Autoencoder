@@ -1,4 +1,4 @@
-N_THREADS=8
+N_THREADS=2
 
 if [ -z $1 ] || [ -z $2 ]; then
     echo "usage: bash generate_validation_commands.sh <models_folder> <config_file> <optional_best_only>"
@@ -27,7 +27,7 @@ VMV=$(basename $VMVpath)
 region=$(echo $VMV | sed -e 's/.*haplotypes\.//g' | sed -e 's/.*_//g')
 chr=$(basename $model_folder | cut -f2 -d '_')
 
-for i in $(grep "VAL_GA_DIR" $cfg | tr -d ' '); do 
+for i in $(grep "^VAL_GA_DIR" $cfg | tr -d ' '); do 
     idx=$(echo $i | tr '.' ' ' | tr '=' ' ' | cut -f 2 -d ' ')
     val_root=$(echo $i | tr '=' ' ' | cut -f 2 -d ' ')
     cmd0="cat $VMVpath | cut -f 1-5 | grep -v '#' > ${VMV}.1-5"
