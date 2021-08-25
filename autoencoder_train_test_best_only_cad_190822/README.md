@@ -38,7 +38,7 @@ Run across multiple multi-GPU nodes (recommended)
 
 ```
 for i in $out/full_training_list.txt???; do
-    sbatch --export=train_list=$i --job-name=3_train_best_model_a100 3_train_best_model_$gpu.sbatch
+    sbatch --export=train_list=$i --job-name=3_train_custom_best_model_$gpu 3_train_custom_best_model_$gpu.sbatch
 done
 ```
 
