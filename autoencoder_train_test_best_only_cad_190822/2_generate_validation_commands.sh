@@ -33,15 +33,15 @@ for i in $(grep "^VAL_GA_DIR" $cfg | tr -d ' '); do
     cmd0="cat $VMVpath | cut -f 1-5 | grep -v '#' > ${VMV}.1-5"
     val_wgs=$(cat $cfg | tr -d ' ' | tr '=' '\t' | grep -w "^VAL_WGS_DIR\.$idx" | awk '{print $NF}')
     
-    if [ -z $3 ]; then
-        cmd1="bash $inference_script IMPUTATOR_$VMV ${VMV}.1-5 $val_root inference_output_$idx > run_inference.sh\n\nparallel -j $N_THREADS < run_inference.sh"
-        cmd2="bash $evaluation_script inference_output_$idx $val_root $val_wgs evaluation_output_$idx > run_evaluation.sh\n\nparallel -j $N_THREADS < run_evaluation.sh"
-        tsv_list="evaluation_output_$idx/*model*.*per_variant*.tsv"
-    else
+#    if [ -z $3 ]; then
+#        cmd1="bash $inference_script IMPUTATOR_$VMV ${VMV}.1-5 $val_root inference_output_$idx > run_inference.sh\n\nparallel -j $N_THREADS < run_inference.sh"
+#        cmd2="bash $evaluation_script inference_output_$idx $val_root $val_wgs evaluation_output_$idx > run_evaluation.sh\n\nparallel -j $N_THREADS < run_evaluation.sh"
+#        tsv_list="evaluation_output_$idx/*model*.*per_variant*.tsv"
+#    else
         cmd1="bash $inference_script IMPUTATOR_$VMV ${VMV}.1-5 $val_root inference_output_$idx  | grep \"_F\.\" > run_inference.sh\n\nparallel -j $N_THREADS < run_inference.sh"
         cmd2="bash $evaluation_script inference_output_$idx $val_root $val_wgs evaluation_output_$idx  | grep \"_F\.\" > run_evaluation.sh\n\nparallel -j $N_THREADS < run_evaluation.sh"
         tsv_list="evaluation_output_$idx/*model*_F.*per_variant*.tsv"
-    fi
+#    fi
 
     #minimac
     #VAL=$(basename $(find ${val_root}_minimac4 | grep $region | grep ${minimac_suffix}))
