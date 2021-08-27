@@ -24,23 +24,23 @@ competitor_suffix=.masked.imputed_COMPETITOR.dose.vcf_per_variant_results.txt
 VMVpath=$(cat INPUT)
 VMV=$(basename $VMVpath)
 
-region=$(echo $VMV | sed -e 's/.*haplotypes\.//g' | sed -e 's/.*_//g')
-chr=$(basename $model_folder | cut -f2 -d '_')
+region=$(echo $VMV | sed -e 's/.*haplotypes\.//g' | sed -e 's/.*_//g' | sed -e 's/\.gz$//g')
+chr=$(basename $model_folder | cut -f1 -d '_')
 
 for i in $(grep "^VAL_GA_DIR" $cfg | tr -d ' '); do 
     idx=$(echo $i | tr '.' ' ' | tr '=' ' ' | cut -f 2 -d ' ')
-    val_root=$(echo $i | tr '=' ' ' | cut -f 2 -d ' ')
-    cmd0="cat $VMVpath | cut -f 1-5 | grep -v '#' > ${VMV}.1-5"
-    val_wgs=$(cat $cfg | tr -d ' ' | tr '=' '\t' | grep -w "^VAL_WGS_DIR\.$idx" | awk '{print $NF}')
+    val_root=$(echo $i | tr '=' ' ' | cut -f 2 -d ' ' | sed -e "s/{1\.\.22}/$chr/g")
+    cmd0="(zcat $VMVpath || cat $VMVpath) | cut -f 1-5 | grep -v '#' > ${VMV}.1-5"
+    val_wgs=$(cat $cfg | tr -d ' ' | tr '=' '\t' | grep -w "^VAL_WGS_DIR\.$idx" | awk '{print $NF}' | sed -e "s/{1\.\.22}/$chr/g")
     
 #    if [ -z $3 ]; then
-#        cmd1="bash $inference_script IMPUTATOR_$VMV ${VMV}.1-5 $val_root inference_output_$idx > run_inference.sh\n\nparallel -j $N_THREADS < run_inference.sh"
-#        cmd2="bash $evaluation_script inference_output_$idx $val_root $val_wgs evaluation_output_$idx > run_evaluation.sh\n\nparallel -j $N_THREADS < run_evaluation.sh"
-#        tsv_list="evaluation_output_$idx/*model*.*per_variant*.tsv"
+        cmd1="bash $inference_script IMPUTATOR_$VMV ${VMV}.1-5 $val_root inference_output_$idx > run_inference.sh\n\nparallel -j $N_THREADS < run_inference.sh"
+        cmd2="bash $evaluation_script inference_output_$idx $val_root $val_wgs evaluation_output_$idx > run_evaluation.sh\n\nparallel -j $N_THREADS < run_evaluation.sh"
+        tsv_list="evaluation_output_$idx/*model*.*per_variant*.tsv"
 #    else
-        cmd1="bash $inference_script IMPUTATOR_$VMV ${VMV}.1-5 $val_root inference_output_$idx  | grep \"_F\.\" > run_inference.sh\n\nparallel -j $N_THREADS < run_inference.sh"
-        cmd2="bash $evaluation_script inference_output_$idx $val_root $val_wgs evaluation_output_$idx  | grep \"_F\.\" > run_evaluation.sh\n\nparallel -j $N_THREADS < run_evaluation.sh"
-        tsv_list="evaluation_output_$idx/*model*_F.*per_variant*.tsv"
+#        cmd1="bash $inference_script IMPUTATOR_$VMV ${VMV}.1-5 $val_root inference_output_$idx  | grep \"_F\.\" > run_inference.sh\n\nparallel -j $N_THREADS < run_inference.sh"
+#        cmd2="bash $evaluation_script inference_output_$idx $val_root $val_wgs evaluation_output_$idx  | grep \"_F\.\" > run_evaluation.sh\n\nparallel -j $N_THREADS < run_evaluation.sh"
+#        tsv_list="evaluation_output_$idx/*model*_F.*per_variant*.tsv"
 #    fi
 
     #minimac
@@ -83,13 +83,13 @@ for i in $(grep "^VAL_GA_DIR" $cfg | tr -d ' '); do
 
     custom_title=$(basename $model_folder | tr '_' ':' | sed -e 's/^/chr/g')
 
-    if [ -z ${3} ]; then
-        cmd3="Rscript $plot_script $tsv_list --threshold -1 $custom_files $custom_names --custom_title $custom_title --out_dir plots_$idx"    
-        echo -e "$cmd0\n\n$cmd1\n\n$cmd2\n\n$cmd3\n\n"
-    else
+#    if [ -z ${3} ]; then
+#        cmd3="Rscript $plot_script $tsv_list --threshold -1 $custom_files $custom_names --custom_title $custom_title --out_dir plots_$idx"    
+#        echo -e "$cmd0\n\n$cmd1\n\n$cmd2\n\n$cmd3\n\n"
+#    else
         cmd3="Rscript $plot_script $tsv_list --threshold -1 $custom_files $custom_names --custom_title $custom_title --out_dir full_training_plots_$idx"    
         echo -e "$cmd0\n\n$cmd1\n\n$cmd2\n\n$cmd3\n\n"
-    fi
+#    fi
 
 
 done

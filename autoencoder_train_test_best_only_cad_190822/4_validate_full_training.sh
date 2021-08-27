@@ -21,7 +21,7 @@ train_script=$(cat BATCH_ID)
 model_list=$(cat $train_script_all | sed -e 's/.*--model_id //g' | sed -e 's/ .*//g' | sed -e 's/_F$//g')
 
 for model in $model_list; do
-    avg=$(cat $mdir/full_training_plots_[0-9]/overall_results_per_model.tsv | grep -w "${model}_F" | cut -f 2 | awk '{ sum += $1 } END { if(NR==0) {print "NA"} else{print sum / NR} }')
+    avg=$(cat $mdir/full_training_plots_[0-9]/overall_results_per_model.tsv | cut -f 2 | awk '{ sum += $1 } END { if(NR==0) {print "NA"} else{print sum / NR} }')
     echo -e "${model}_F\t$avg"
 done > $train_script_all.full_model_r2pop.txt
 
