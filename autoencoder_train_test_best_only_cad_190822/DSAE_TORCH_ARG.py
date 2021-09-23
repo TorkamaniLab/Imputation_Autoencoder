@@ -38,7 +38,6 @@ use_last_batch_for_validation=False
 
 ############data encoding options
 encode_inputs_to_binomial=True #True: output layer will hav same format as output, False: use dosages directly as input (fewer nodes, less memory)
-min_MAF=0.0
 
 #Debugging options
 verbose=0
@@ -140,7 +139,7 @@ def calculate_alpha(y_true,flip=False):
     #alpha1 = Variable(torch.from_numpy(alpha1).double()).cuda()
     return alpha1
 
-def filter_by_MAF(ys, MAF):
+def filter_by_MAF(ys, MAF, min_MAF, max_MAF):
     original_shape = ys.shape
     
     ys_values = ys.copy().transpose((1,0,2))
@@ -149,7 +148,7 @@ def filter_by_MAF(ys, MAF):
     ys_dict = dict(zip(indexes,ys_values))
     
     MAF_a = np.array(MAF)
-    filtered_mask = MAF_a >= min_MAF
+    filtered_mask = (MAF_a > min_MAF)*(MAF_a <= max_MAF)
     indexes = np.array(indexes)
     filtered_keys = indexes[filtered_mask]
     
@@ -158,10 +157,10 @@ def filter_by_MAF(ys, MAF):
     mapped_ys = np.array(list(sorted_subdict.values())).transpose((1,0,2))
     
     print(mapped_ys.shape)
-    print("UNIQUE keys", len(np.unique(filtered_keys)))
+    #print("UNIQUE keys", len(np.unique(filtered_keys)))
     mapped_ys = np.reshape(mapped_ys, [original_shape[0],len(filtered_keys), original_shape[2]])
    
-    return mapped_ys
+    return filtered_keys, mapped_ys
 
 
 def mask_data_per_sample_parallel(mydata, mask_rate=0.9):
@@ -408,9 +407,10 @@ def main(ar):
     sample_ids, y_true, MAF, pos = extract_genotypes_allel(ar.input, extract_pos=True, unique=True)
     print("Input dims:", y_true.shape)
     
-    if(min_MAF>0):
-        filtered_y_true = filter_by_MAF(y_true, MAF)
-        print("FILTERED OUTPUT LAYER WITH MAF THRESHOLD", min_MAF)
+    if(ar.min_MAF>0 or ar.max_MAF<0.5):
+        filtered_indexes, filtered_y_true = filter_by_MAF(y_true, MAF, ar.min_MAF, ar.max_MAF)
+        pos = pos[filtered_indexes]
+        print("FILTERED OUTPUT LAYER WITH MAF THRESHOLD", ar.min_MAF, "-", ar.max_MAF)
     else:
         filtered_y_true = y_true
         
@@ -498,6 +498,9 @@ def main(ar):
 
     hp_path = model_dir+'/'+ar.model_id+'_param.py'
 
+    pos_path = model_dir+'/'+ar.model_id+'_pos.txt'
+    pos.tofile(pos_path, sep = '\n')
+
     #TRAINING RESUME FEATURE ADDED: loads weights from previously trained model. Note that the current model must have the same architecture as the previous one.
     write_mode = 'w'
     if(ar.resume==True and (not os.path.exists(model_path) or not os.path.exists(hp_path))):
@@ -547,6 +550,8 @@ def main(ar):
         param_file.write("n_layers = "+str(n_layers)+"\n")
         param_file.write("size_ratio = "+str(size_ratio)+"\n")
         param_file.write("activation = \'"+act+"\'"+"\n")
+        param_file.write("ni = "+str(ni)+"\n")
+        param_file.write("no = "+str(no)+"\n")
         if write_mode == 'w':
             param_file.write("early_stop = 0\n")
     print("New inference parameters saved at:", hp_path)
@@ -635,7 +640,7 @@ def main(ar):
             
             #if applying KL divergence regularization
             if BETA > 0:
-                kl_sparsity = sparse_loss(RHO, true_data, model_children)
+                kl_sparsity = sparse_loss(RHO, masked_data, model_children)
                 loss = loss + kl_sparsity
                 
             #backward propagation
@@ -716,6 +721,8 @@ if __name__ == "__main__":
     parser.add_argument("-Z", "--batch_size", type=int, help="[int] batch size", default=256)
     parser.add_argument("-X", "--max_epochs", type=int, help="[int] maximum number of epochs if early stop criterion is not reached", default=20000)
     parser.add_argument("-U", "--resume", type=int, help="[0 or 1]=[false or true] whether enable resume mode: recover saved model (<model_id>.pth file) in the model folder and resume training from its saved weights.", default=0)
+    parser.add_argument("--min_MAF", type=float, help="[float] minimum minor allele frequency (MAF) to be in the output layer", default=0)
+    parser.add_argument("--max_MAF", type=float, help="[float] maximum minor allele frequency (MAF) to be in the output layer", default=0.5)
 
     args = parser.parse_args()
     print("ARGUMENTS", args)
