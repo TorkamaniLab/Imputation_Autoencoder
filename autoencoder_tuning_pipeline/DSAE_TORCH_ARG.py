@@ -51,6 +51,7 @@ elif(par_mask_method == "thread"):
 elif(par_mask_method == "ray"):
     import ray
 do_numpy_masking=True
+CPU_GPU_par=True
 #set max 40 or less CPUs for masking, avoid interprocess and CPU-GPU communication overload
 par_mask_proc=min(40,mp.cpu_count())
 #
@@ -581,25 +582,44 @@ def main(ar):
         alphas = None
     else:
         alphas = calculate_alpha(filtered_y_true)
-    
+
     startTime = time.time()
     i=0
-    
+
+    def mask_worker(my_data_obs, my_filtered_y_train, my_mask_rate):
+        xs = mask_data_per_sample_parallel(my_data_obs.copy(), my_mask_rate)
+        xs = flatten_data(xs)
+        ys = flatten_data(my_filtered_y_train.copy())
+        randomize = np.random.rand(len(ys)).argsort()
+        xs=xs[randomize]
+        ys=ys[randomize]
+        return [xs, ys]
+
+    if(CPU_GPU_par==True):
+        xs, ys = mask_worker(data_obs, filtered_y_train, mask_ratio_list[i])
+
     for epoch in range(start,max_epochs):
         epochStart = time.time()
         epoch_loss=0
         #prepare data, do masking
         print("MASK RATIO:",mask_ratio_list[i])
-        xs = mask_data_per_sample_parallel(data_obs.copy(), mask_rate=mask_ratio_list[i])
-        xs = flatten_data(xs)
-        ys = flatten_data(filtered_y_train.copy())
-        randomize = np.random.rand(len(ys)).argsort()
-        xs=xs[randomize]
-        ys=ys[randomize]
-        cpuStop = time.time()
-        cpuTime = (cpuStop-epochStart)
 
-        comTime = 0        
+        if(CPU_GPU_par==False):
+            #xs = mask_data_per_sample_parallel(data_obs.copy(), mask_rate=mask_ratio_list[i])
+            #xs = flatten_data(xs)
+            #ys = flatten_data(filtered_y_train.copy())
+            #randomize = np.random.rand(len(ys)).argsort()
+            #xs=xs[randomize]
+            #ys=ys[randomize]
+            xs, ys = mask_worker(data_obs, filtered_y_train, mask_ratio_list[i])
+            cpuStop = time.time()
+            cpuTime = (cpuStop-epochStart)
+        else:
+            #running thread on the background
+            pool = mp.pool.ThreadPool(processes=1)
+            async_result = pool.apply_async(mask_worker, (data_obs, filtered_y_train, mask_ratio_list[i]))
+
+        comTime = 0
         gpuTime = 0
 
         i+=1
@@ -640,7 +660,7 @@ def main(ar):
             
             #if applying KL divergence regularization
             if BETA > 0:
-                kl_sparsity = sparse_loss(RHO, masked_data, model_children)
+                kl_sparsity = sparse_loss(RHO, true_data, model_children)
                 loss = loss + kl_sparsity
                 
             #backward propagation
@@ -661,11 +681,20 @@ def main(ar):
             val_loss = criterion(val_reconstructed, val_true_data)
             print('epoch [{}/{}], validation loss:{:.4f}'.format(epoch + 1, max_epochs,val_loss.data))
                 
-
-                
         tmp_loss += epoch_loss/total_batch
+
+        if(CPU_GPU_par==True):
+            #wait for result from background thread
+            cpuStart = time.time()
+            xs, ys = async_result.get()
+            pool.close()
+            pool.terminate()
+            #pool.join()
+            cpuStop = time.time()
+            cpuTime = (cpuStop-cpuStart)
+
         epochTime = (time.time()-epochStart)
-                
+        
         print('epoch [{}/{}], epoch time:{:.4f}, CPU-task time:{:.4f}, GPU-task time:{:.4f}, CPU-GPU-communication time:{:.4f}, loss:{:.4f}'.format(epoch + 1, max_epochs,epochTime, cpuTime, gpuTime, comTime, epoch_loss/total_batch), flush=True)
         
         if((epoch+1) % n_masks == 0):
