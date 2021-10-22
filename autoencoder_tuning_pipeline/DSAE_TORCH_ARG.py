@@ -655,12 +655,12 @@ def main(ar):
             
             #if applying L1 regularizaton
             if L1 > 0:
-                l1_sparsity = l1_loss(autoencoder)
+                l1_sparsity = L1 * l1_loss(autoencoder)
                 loss = loss + l1_sparsity
             
             #if applying KL divergence regularization
             if BETA > 0:
-                kl_sparsity = sparse_loss(RHO, true_data, model_children)
+                kl_sparsity = BETA * sparse_loss(RHO, true_data, model_children)
                 loss = loss + kl_sparsity
                 
             #backward propagation
