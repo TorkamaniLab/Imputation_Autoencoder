@@ -102,7 +102,6 @@ while read train_script; do
 
 
 
-
         if [ $result -ne -1 ]; then
             echo "Submited $mdir/train_best_${model_id}.sh, PID $result"
             echo "Script content:"
@@ -110,8 +109,20 @@ while read train_script; do
             echo "Directory: $mdir"
             echo -e "$result" >> $pids
             #allow some time to the job allocate the whole VRAM it needs, then go to the next
-            sleep 180
+            n=0
+            while [ $n -lt 18 ]; do
+                # echo ${n}
+                if grep -q "Execution\|Cancelling" ${mdir}/$(less $mdir/train_best_${model_id}.sh | tr ' ' '\n' | tail -3 | head -1); then
+                    grep "Execution\|Cancelling" ${mdir}/$(less $mdir/train_best_${model_id}.sh | tr ' ' '\n' | tail -3 | head -1)
+                    break
+                else
+                    sleep 10
+                    let n=n+1
+                fi
+            done
+            # sleep 180
         fi
+
     done
 done < $train_list
 
