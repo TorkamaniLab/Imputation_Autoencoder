@@ -84,8 +84,8 @@ while read train_script; do
             sed -i -e "s/CUDA_VISIBLE_DEVICES=[0-9] /CUDA_VISIBLE_DEVICES=$gpui /g" train_best_${model_id}.sh
             #${GPU_flags[${gpui}]}bash $train_script &
             #${GPU_flags[${gpui}]}bash train_best_${model_id}.sh &
-            ${GPU_flags[${gpui}]}bash train_best_${model_id}.sh 1> train_best.${model_id}.out 2> train_best_${model_id}.log &
-            echo -e "${GPU_flags[${gpui}]}bash train_best_${model_id}.sh 1> train_best.${model_id}.out 2> train_best_${model_id}.log"
+            ${GPU_flags[${gpui}]}bash train_best_${model_id}.sh 1>> train_best.${model_id}.out 2> train_best_${model_id}.log &
+            echo -e "${GPU_flags[${gpui}]}bash train_best_${model_id}.sh 1>> train_best.${model_id}.out 2> train_best_${model_id}.log"
             PID=$!
             result=$PID
             cd $curr_dir
