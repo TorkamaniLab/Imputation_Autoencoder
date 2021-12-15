@@ -62,7 +62,7 @@ if [ -f ${out_root}/full_training_list.txt ]; then
     rm ${out_root}/full_training_list.txt*
 fi
 
-for i in $traindir/*3870*.VMV1.gz; do
+for i in $traindir/*.VMV1.gz; do
 
     region=$(echo $i | sed -e 's/.*\.haplotypes\.//' | sed -e 's/.*_//g' | sed -e 's/\..*//g')
     chr=$(echo $i | sed -e 's/.*chr//g' | sed -e 's/\..*//g')
