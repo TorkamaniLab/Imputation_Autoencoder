@@ -969,6 +969,10 @@ def main(args):
         mycursor.execute("CREATE DATABASE IF NOT EXISTS " + study_name)
         storage_name = "mysql://{}/{}".format(ar.mysql, study_name)
         print("Storage name (MySQL):", storage_name)
+    if 'PGSQL_URL' in os.environ:
+        ar.study_name = os.environ['STUDY']
+        storage_name = os.environ['PGSQL_URL']
+        print(f"Using POSTGRESQL to connect to study: {ar.study_name}")
     
     study = optuna.create_study(direction="maximize", sampler=sampler, 
                                 study_name=ar.study_name, storage=storage_name,
