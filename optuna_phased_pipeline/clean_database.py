@@ -4,6 +4,7 @@ import mysql.connector
 print(sys.argv)
 if(len(sys.argv)!=3):
     print("Usage: script.py <user@host> <database_name>")
+    print('Alternately, try: optuna delete-study --study-name "$STUDY" --storage "$PGSQL_URL"')
     sys.exit()
 user_name, host_name = sys.argv[1].split('@')
 mydb = mysql.connector.connect(host=host_name,user=user_name)
