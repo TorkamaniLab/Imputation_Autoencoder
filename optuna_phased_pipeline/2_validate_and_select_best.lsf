@@ -12,6 +12,9 @@
 
 source /ccs/proj/bif138/env.sh
 
+module load bzip2 r/4.0.5
+
+conda activate my-opence-ray
 
 #sbatch --export=mdir=chr22/22_17274081-17382360,input=input.cfg --job-name=2_validate_and_select_best 2_validate_and_select_best.sbatch
 #bsub -env "all, mdir=chr22_models/22_17274081-17382360, input=input.cfg" -J $(basename chr22_models/22_17274081-17382360) 2_validate_and_select_best.lsf
