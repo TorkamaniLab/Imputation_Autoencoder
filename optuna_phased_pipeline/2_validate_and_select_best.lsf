@@ -1,0 +1,28 @@
+#!/bin/bash
+##### project id must be bif138 (our official project ID, all lower case)
+#BSUB -P bif138
+#####24 hours
+#BSUB -W 24:00
+#BSUB -nnodes 1
+#########BSUB -alloc_flags gpumps
+#BSUB -q batch-hm
+#BSUB -o logs/job_%J.out
+#BSUB -e logs/job_%J.log
+
+
+source /ccs/proj/bif138/env.sh
+
+module load bzip2 r/4.0.5
+
+conda activate my-opence-ray
+
+#sbatch --export=mdir=chr22/22_17274081-17382360,input=input.cfg --job-name=2_validate_and_select_best 2_validate_and_select_best.sbatch
+#bsub -env "all, mdir=chr22_models/22_17274081-17382360, input=input.cfg" -J $(basename chr22_models/22_17274081-17382360) 2_validate_and_select_best.lsf
+#for mdir in chr22_models/22_*; do 
+#bsub -env "all, mdir=$mdir, input=input.cfg" -J $(basename $mdir) 2_validate_and_select_best.lsf
+#done
+
+#####cd $SLURM_SUBMIT_DIR
+
+#####bash 2_validate_and_select_best.sh $mdir $input
+jsrun -r 1 -n 1 -g 6 -c 42 --latency_priority gpu-cpu,cpu-cpu bash 2_validate_and_select_best.sh $mdir $input

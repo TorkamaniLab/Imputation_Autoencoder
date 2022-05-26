@@ -1,0 +1,14 @@
+dataset: GRCh37
+name: "20_0_62435964"
+revision: 1-1
+source: fake
+chromosome: 20
+mrate: 0.60
+nvar: 5
+start: 17365233
+end: 17413519
+input_file: ../example.vcf
+ground:
+  - ../test_gnd.vcf
+validation:
+  - ../test_val.vcf

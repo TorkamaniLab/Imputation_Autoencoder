@@ -361,8 +361,11 @@ class Autoencoder(nn.Module):
         x = self.encoder(x)
         x = self.decoder(x)
         #avoiding error (Assertion `input_val >= zero && input_val <= one` failed.)
-        x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=0.0)
-        #x = x.clamp(0, 1)
+        #only supported by pytorch 1.8 or newer
+        #x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=0.0)
+        #supported by older pytorches
+        x = torch.where(torch.isnan(x), torch.tensor(0.), x)
+        x = torch.where(torch.isinf(x), torch.tensor(0.), x)
         return x    
 
 def focal_loss(y_pred, y_true, gamma=3, alpha=None, inverse=False):
