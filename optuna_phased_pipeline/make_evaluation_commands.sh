@@ -25,9 +25,9 @@ for imputed_path in $imputed_dir/*.vcf.gz; do
 
     imputed_name=$(basename $imputed_path)
 
-    ga_name=$(basename $imputed_path | sed -e 's/\.imputed\..*//g')
+    ga_name=$(basename $imputed_path | sed -e 's/\.imputed\..*//g' | sed -e 's/\.gz$//g')
 
-    ga_path=$(find $ga_dir/ | grep -w "${ga_name}\.gz$")
+    ga_path=$(find "${ga_dir}/" | grep -w "${ga_name}\.gz$")
     #ga_path=$(find $ga_dir | grep -w "${ga_name}$") #this returns error in cyvcf2
 
 
