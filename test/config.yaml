@@ -1,0 +1,10 @@
+sampler: CMA
+sampling_res: random
+trials_per_job: 2
+pruning: 1
+patience: 0
+max_models_per_gpu: 1
+train_dir: '.'
+val_ga_dir: []
+val_wgs_dir: []
+max_epochs: 5

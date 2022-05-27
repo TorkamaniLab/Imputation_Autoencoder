@@ -246,7 +246,9 @@ write.table(correls, file=file_name, quote = FALSE, row.names = FALSE, col.names
 plots <- list(p1,p2,p3,p4,p5)
 
 for(i in 1:5){
-    for(suffix in c(".pdf", ".png")){
+    #doesn't work on summit because png needs X11
+    #for(suffix in c(".pdf", ".png")){
+    for(suffix in c(".pdf")){
         plot_name <- paste0("p",i,suffix)
         file_name <- file.path(parsed_args$out_dir, plot_name)
         print(paste0("Saving plot ",i, " in ", file_name))
