@@ -78,7 +78,9 @@ library(gtools)
 
 
 i=1
-model_id<-str_match(args[1], ".imputed.\\s*(.*?)\\s*.vcf_per_variant.tsv")[,2]
+#model_id<-str_match(args[1], ".imputed.\\s*(.*?)\\s*.vcf_per_variant.tsv")[,2]
+# e.g. evaluation_output_1/model_9.vcf_per_variant.tsv
+model_id<-str_match(args[1], "[ ./](model_[0-9]+)[ ./]")[,2]
 print(paste0("Processing model with model id: ",model_id))
 
 data_to_plot <- read.table(args[1], header=TRUE, sep='\t', stringsAsFactors=FALSE)
@@ -90,7 +92,7 @@ mydata <- data_to_plot
 if(length(args>1)){
 
     for(tsv_file in args[-1]){
-       model_id<-str_match(tsv_file, ".imputed.\\s*(.*?)\\s*.vcf_per_variant.tsv")[,2]
+       model_id<-str_match(tsv_file, "[ ./](model_[0-9]+)[ ./]")[,2]
        print(paste0("Processing model with model id: ",model_id))
        i=i+1
        mydata <- read.table(tsv_file, header=TRUE, sep='\t', stringsAsFactors=FALSE)
