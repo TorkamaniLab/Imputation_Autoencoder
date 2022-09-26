@@ -1,0 +1,18 @@
+sampler: CMA
+sampling_res: random
+trials_per_job: 500
+pruning: 1
+patience: 0
+max_models_per_gpu: 6
+max_epochs: 300
+mysql: ''
+train_dir: 'HRC/VMV/hg19/training/chr22'
+
+# comment 
+val_ga_dir:
+  - 'ARIC/VMV/hg19/validation/EUR_AFR/chr{chromosome}/chr{chromosome}_AFFY6'
+  - 'ARIC/VMV/hg19/validation/EUR_AFR/chr{chromosome}/chr{chromosome}_AXIOM'
+  - 'ARIC/VMV/hg19/validation/EUR_AFR/chr{chromosome}/chr{chromosome}_OMNI1M'
+
+val_wgs_dir:
+  - 'ARIC/VMV/hg19/validation/EUR_AFR/chr{chromosome}/chr{chromosome}'
