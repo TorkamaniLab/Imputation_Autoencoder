@@ -11,9 +11,9 @@ inference:
     script: |
         zcat `tile_path 'input_file'` | cut -f 1-5 | grep -v '#' >input.1-5
 
-        validation=`tile_path 'validation[{n}-1]'`
+        export validation=`tile_path 'validation[{n}-1]'`
 
-        out=inference_output_{n}
+        export out=inference_output_{n}
         mkdir -p $out
         function run_inference {{
             model=`basename $1 .pth`
@@ -41,9 +41,9 @@ evaluation:
     out:
         - evaluation_output_{n}/done
     script: |
-        out=evaluation_output_{n}
+        export out=evaluation_output_{n}
         mkdir -p $out
-        ground=`tile_path 'ground[0]'`
+        export ground=`tile_path 'ground[0]'`
         function run_imputation {{
             model=`basename $1 .pth`
 
@@ -100,6 +100,8 @@ summary:
         - plots_3/done
     out:
         - summary.csv
+        - model_r2pop.txt
+        - competitor_r2pop.txt
     script: |
         scripts=/ccs/proj/bif138/rogersdd/Imputation_Autoencoder/hpc_pipeline/src
 

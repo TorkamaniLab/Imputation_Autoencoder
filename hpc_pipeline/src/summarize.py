@@ -46,7 +46,7 @@ def avg_cols(df):
 
 summary['avg_r2'] = avg_cols( summary[[f'Mean_r2_{i}' for i in [1,2,3]]] )
 summary.sort_values('avg_r2', inplace=True, ascending=False)
-summary.to_csv('summary.csv')
+summary.to_csv('validation.csv')
 
 # drop non-models
 #summary.drop(method_index, axis=0, inplace=True)
