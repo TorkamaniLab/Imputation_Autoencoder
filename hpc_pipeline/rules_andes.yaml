@@ -1,0 +1,108 @@
+inference:
+    resource:
+        time: 10
+        nrs:  1
+        cpu:  32
+    launcher: "{mpirun}"
+    inp:
+        - IMPUTATOR
+    out:
+        - inference_output_{n}/done
+    script: |
+        zcat `tile_path 'input_file'` | cut -f 1-5 | grep -v '#' >input.1-5
+
+        export validation=`tile_path 'validation[{n}-1]'`
+
+        export out=inference_output_{n}
+        mkdir -p $out
+        function run_inference {{
+            model=`basename $1 .pth`
+
+            inference_function_dip_oh input.1-5 $validation \
+                IMPUTATOR --model_name $model --output $out/$model.vcf
+
+            bgzip -c $out/$model.vcf > $out/$model.vcf.gz
+            tabix -p vcf -f $out/$model.vcf.gz
+            rm $out/$model.vcf
+        }}
+        export -f run_inference
+        parallel run_inference ::: IMPUTATOR/model_*.pth
+
+        touch {out[0]}
+
+evaluation:
+    resource:
+        time: 10
+        nrs:  1
+        cpu:  32
+    launcher: "{mpirun}"
+    inp:
+        - inference_output_{n}/done
+    out:
+        - evaluation_output_{n}/done
+    script: |
+        export out=evaluation_output_{n}
+        mkdir -p $out
+        export ground=`tile_path 'ground[0]'`
+        function run_imputation {{
+            model=`basename $1 .pth`
+
+            Compare_imputation_to_WGS --wgs $ground \
+                    --imputed inference_output_{n}/$model.vcf.gz \
+                    --ga `tile_path 'validation[{n}-1]'` \
+                    --sout $out/$model.vcf_per_sample.tsv \
+                    --vout $out/$model.vcf_per_variant.tsv
+        }}
+        export -f run_imputation
+        parallel run_imputation ::: IMPUTATOR/model_*.pth
+
+        touch {out[0]}
+
+plots:
+    resource:
+        time: 10
+        nrs:  1
+        cpu:  8
+    launcher: "{mpirun}"
+    inp:
+        - evaluation_output_{n}/done
+    out:
+        - plots_{n}/done
+    script: |
+        scripts=/ccs/proj/bif138/rogersdd/Imputation_Autoencoder/optuna_phased_pipeline
+        # lookup name of sequencer type from n
+        seqs=(0 AFFY6 AXIOM OMNI1M)
+        seq=${{seqs[{n}]}}
+
+        out=plots_{n}
+        mkdir -p $out
+        Rscript $scripts/plot_evaluation_results_per_variant.R \
+            evaluation_output_{n}/*.vcf_per_variant.tsv --threshold -1 --custom_files \
+            `tile_path "validation[{n}-1].replace('${{seq}}','${{seq}}_minimac4').replace('gz','imputed_minimac.dose.vcf_per_variant_results.txt')"` \
+            `tile_path "validation[{n}-1].replace('${{seq}}','${{seq}}_beagle5').replace('gz','imputed_beagle.vcf_per_variant_results.txt')"` \
+            `tile_path "validation[{n}-1].replace('${{seq}}','${{seq}}_impute5').replace('gz','imputed_impute.vcf_per_variant_results.txt')"` \
+            --custom_names phased_minimac phased_beagle phased_impute \
+            --custom_title `tile_path 'name.replace("_",":")'` \
+            --out_dir $out
+
+        # FIXME: beagle5 and impute5 do not have .dose. in their name
+
+        touch {out[0]}
+
+summary:
+    resource:
+        time: 4
+        nrs:  1
+        cpu:  1
+    inp:
+        - plots_1/done
+        - plots_2/done
+        - plots_3/done
+    out:
+        - summary.csv
+        - model_r2pop.txt
+        - competitor_r2pop.txt
+    script: |
+        scripts=/ccs/proj/bif138/rogersdd/Imputation_Autoencoder/hpc_pipeline/src
+
+        {mpirun} python $scripts/summarize.py

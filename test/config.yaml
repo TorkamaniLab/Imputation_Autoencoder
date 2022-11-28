@@ -7,4 +7,4 @@ max_models_per_gpu: 1
 train_dir: '.'
 val_ga_dir: []
 val_wgs_dir: []
-max_epochs: 5
+max_epochs: 50

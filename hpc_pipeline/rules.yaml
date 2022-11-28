@@ -1,0 +1,22 @@
+hyperparam:
+    resource:
+        time: 30
+        nrs:  48
+        # e.g. 7 CPU and 1 GPU
+        #  or 14 CPU and 2 GPU
+        #  or 21 CPU and 3 GPU
+        cpu:  "{cpus_per_model}"
+        gpu:  "{gpus_per_model}"
+        jsrun_attr: "-b packed:{cpus_per_model}"
+    out:
+        - summary.csv
+    script: |
+        echo {dirname}
+        start=`date +%s`
+        complete() {{
+          end=`date +%s`
+          echo "Completed in $((end-start)) seconds"
+        }}
+        trap complete EXIT
+
+        {mpirun} withdb.sh genome_train ../config.yaml tile.yaml
